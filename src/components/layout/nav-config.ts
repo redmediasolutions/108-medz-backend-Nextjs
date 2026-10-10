@@ -10,9 +10,9 @@ export type NavItem = {
 
 /** Same destinations as the Flutter NavigationRail (nav/shell.dart). */
 export const NAV_ITEMS: NavItem[] = [
-  { title: "Products", href: "/search", icon: PackageSearch, disabled: true },
+  { title: "Products", href: "/products", icon: PackageSearch },
   { title: "Search data", href: "/searchdata", icon: ScanSearch, disabled: true },
-  { title: "Customers", href: "/customers", icon: Users, disabled: true },
+  { title: "Customers", href: "/customers", icon: Users },
   { title: "Prescriptions", href: "/prescriptions", icon: ClipboardList },
   { title: "Orders", href: "/orders", icon: ShoppingCart, disabled: true },
 ];

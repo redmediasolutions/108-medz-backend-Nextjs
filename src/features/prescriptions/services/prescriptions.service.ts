@@ -68,6 +68,4 @@ export const prescriptionsService = {
     repo.updateItemComment(docId, productId, comment.trim()),
 
   setReady: (docId: string, isReady: boolean) => repo.setReady(docId, isReady),
-
-  searchProducts: (q: string, page = 1) => repo.searchProducts(q.trim(), page),
 };

@@ -19,9 +19,3 @@ export function filterPrescriptions(
       .some((v) => String(v).toLowerCase().includes(q));
   });
 }
-
-export function formatPrice(value: string) {
-  const n = Number(value);
-  if (!value || Number.isNaN(n) || n === 0) return null;
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(n);
-}

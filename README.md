@@ -22,7 +22,22 @@ npm run dev                  # http://localhost:3000
 - **Prescriptions list** (`/prescriptions`): realtime table, status counters, search (ID / customer / mobile / label), status filter, row actions (open, view image, mark prepared/pending).
 - **Prescription detail** (`/prescriptions/[id]`): customer info, ready toggle, medicines table (inline comment saves on Enter/blur, remove with confirm), add-medicine sheet (debounced search, load more, duplicate guard), image viewer with zoom + download.
 
-Sidebar entries for Products, Search data, Customers and Orders are stubbed as "Soon".
+## Phase 2 — Products & Customers
+
+- **Products** (`/products`, old `/search` redirects): catalogue search by name or salt, debounced, infinite scroll, MRP / sale price / discount %, packing, click-to-copy product ID, `?q=` kept in the URL, `/` focuses search. Product search now lives in `features/products` and is reused by the prescriptions "Add medicine" sheet.
+- **Customers** (`/customers`): cursor-paginated `Users` table, total count, exact phone search (tries `98…`, `+9198…`, `9198…`), joining-date range filter, CSV export by date range (up to 5000).
+  - The Flutter date filter and export date range were never applied to the query — they now are (`created_time` range).
+- **Customer detail** (`/customers/[id]?tab=…`, old `/customers/:id/rewards` redirects): profile header + tabs
+  - **Orders** — `Orders where uid == authUid`, expandable cards (items, totals, shipping/billing)
+  - **Cart** — `carts/{authUid}/items`, live qty +/-, remove, clear cart
+  - **Addresses** — `Addresses where userRef in [Users/{uid} ref / string variants]` (Flutter downloaded the whole collection and filtered on the client)
+  - **Rewards** — `Users/{id}/walletTransactions`, balance (same maths as Flutter), adjust points (credited / debited / pending), redeem for cash
+
+Sidebar entries for Search data and Orders are still stubbed as "Soon".
+
+### Firestore indexes
+
+No new composite indexes are needed: customer queries use a single-field range + orderBy on `created_time`, and orders are sorted client-side (same as Flutter).
 
 ## Structure
 
@@ -43,12 +58,28 @@ src/
     providers/   app-providers, auth-provider, theme-provider
     ui/          shadcn primitives
     confirm-dialog.tsx  empty-state.tsx  profile-menu.tsx  theme-toggle.tsx
+  features/products/
+    components/  products-dashboard, product-card, product-thumb, copy-id-button
+    hooks/       use-product-search.ts
+    lib/         product-mapper.ts, product-utils.ts
+    repository/  products.repository.ts
+    services/    products.service.ts
+    types.ts
+  features/customers/
+    addform/     wallet-adjust-dialog.tsx
+    components/  customers-dashboard, customer-detail, customer-{orders,cart,addresses,rewards}-tab,
+                 customer-row-actions-menu, export-customers-dialog, wallet-balance-card, badges, avatar
+    hooks/       use-customers.ts, use-customer-detail.ts
+    lib/         customer-mapper.ts, customer-utils.ts
+    repository/  customers.repository.ts
+    services/    customers.service.ts
+    types.ts
   features/prescriptions/
     addform/     add-medicine-sheet.tsx
     components/  prescriptions-dashboard, prescription-detail, medicines-table, medicine-row,
                  prescription-image-card, ready-status-card, prescription-status-badge,
                  prescription-row-actions-menu
-    hooks/       use-prescriptions.ts, use-product-search.ts
+    hooks/       use-prescriptions.ts
     lib/         prescription-mapper.ts, prescription-utils.ts
     repository/  prescriptions.repository.ts   # Firestore + API calls only
     services/    prescriptions.service.ts       # customer enrichment/cache, business rules
@@ -71,9 +102,16 @@ src/
 | `pages/prescriptions/prescriptiondetail.dart` | `components/prescription-detail.tsx` (+ children) |
 | `pages/prescriptions/adddialog.dart` | `addform/add-medicine-sheet.tsx` |
 | `utils/timeago.dart` | `lib/time-ago.ts` |
+| `pages/searchproducts/searchproducts.dart`, `components/searchcard.dart` | `features/products/*` |
+| `pages/customers/customers.dart` (+ export dialog, cart sheet) | `features/customers/components/customers-dashboard.tsx`, `export-customers-dialog.tsx`, `customer-cart-tab.tsx` |
+| `pages/customers/customer_orders.dart` | `customer-orders-tab.tsx` |
+| `pages/customers/customer_address.dart` | `customer-addresses-tab.tsx` |
+| `pages/customers/customer_rewards_screen.dart`, `models/rewards_service.dart` | `customer-rewards-tab.tsx`, `addform/wallet-adjust-dialog.tsx` |
 
 ## Notes
 
 - Legacy item format (plain int product IDs) is still read; editing a comment on one upgrades it to the object format.
+- Wallet adjustments mirror Flutter exactly, including updating `Users.rewardPoints` for *pending* credits too.
+- The old `/rewards` page (lowercase `users` collection, `rewardTransactions`) wasn't in the Flutter sidebar and looks legacy, so it wasn't ported.
 - The admin check is client-side (as in Flutter). Firestore security rules should also require `isAdmin` for writes to `Prescription`.
 - `lib/services/config.dart` in the Flutter app ships WooCommerce consumer key/secret inside the app bundle. They are **not** used by search and were not copied here; consider rotating them.

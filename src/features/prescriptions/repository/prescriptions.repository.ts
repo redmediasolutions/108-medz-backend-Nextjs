@@ -15,10 +15,9 @@ import {
 
 import { db } from "@/firebase/config";
 import { COLLECTIONS } from "@/firebase/collections";
-import { api } from "@/lib/api";
 
-import { mapPrescriptionDoc, mapPrescriptionItem, mapProduct } from "../lib/prescription-mapper";
-import type { Prescription, PrescriptionCustomer, ProductSearchResult } from "../types";
+import { mapPrescriptionDoc, mapPrescriptionItem } from "../lib/prescription-mapper";
+import type { Prescription, PrescriptionCustomer } from "../types";
 
 /**
  * Raw data access for prescriptions — 1:1 with lib/services/firestore.dart (Flutter).
@@ -98,12 +97,5 @@ export const prescriptionsRepository = {
       isReady,
       updatedAt: serverTimestamp(),
     });
-  },
-
-  /** janmanstore.in backend-search, through our /api proxy. */
-  async searchProducts(search: string, page = 1): Promise<ProductSearchResult[]> {
-    const params = new URLSearchParams({ search, page: String(page), per_page: "20" });
-    const res = await api.get<{ data: Record<string, unknown>[] }>(`/api/products/search?${params}`);
-    return (res.data ?? []).map(mapProduct);
   },
 };

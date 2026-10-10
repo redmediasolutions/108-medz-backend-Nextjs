@@ -1,6 +1,6 @@
 import { DocumentReference, Timestamp, type DocumentSnapshot } from "firebase/firestore";
 
-import type { Prescription, PrescriptionItem, ProductSearchResult } from "../types";
+import type { Prescription, PrescriptionItem } from "../types";
 
 /** Handles both item formats used in Firestore: { productId, productName, comment } and legacy plain ints. */
 export function mapPrescriptionItem(raw: unknown): PrescriptionItem | null {
@@ -55,19 +55,5 @@ export function mapPrescriptionDoc(snap: DocumentSnapshot): Prescription {
     items,
     customerName: (data.customerName as string) ?? null,
     customerMobile: (data.customerMobile as string) ?? null,
-  };
-}
-
-/** Port of SearchModel.fromJson (models/search.dart). */
-export function mapProduct(raw: Record<string, unknown>): ProductSearchResult {
-  return {
-    id: Number(raw.id ?? 0),
-    name: String(raw.name ?? ""),
-    price: String(raw.price ?? "0"),
-    regularPrice: String(raw.regular_price ?? "0"),
-    salePrice: String(raw.sale_price ?? "0"),
-    salt: String(raw.salt_composition ?? ""),
-    productContent: String(raw.product_content ?? ""),
-    image: typeof raw.image === "string" ? raw.image : null,
   };
 }

@@ -10,8 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { useProductSearch } from "../hooks/use-product-search";
-import { formatPrice } from "../lib/prescription-utils";
+import { ProductThumb } from "@/features/products/components/product-thumb";
+import { useProductSearch } from "@/features/products/hooks/use-product-search";
+import { formatINR } from "@/lib/format";
+
 import { prescriptionsService } from "../services/prescriptions.service";
 import type { Prescription, ProductSearchResult } from "../types";
 
@@ -25,7 +27,7 @@ type Props = {
 export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
   const [query, setQuery] = React.useState("");
   const [adding, setAdding] = React.useState<number | null>(null);
-  const { results, loading, error, hasMore, loadMore, searched } = useProductSearch(query);
+  const { results, loading, loadingMore, error, hasMore, loadMore, searched } = useProductSearch(query);
 
   React.useEffect(() => {
     if (!open) setQuery("");
@@ -83,15 +85,10 @@ export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
             <ul className="divide-y">
               {results.map((product) => {
                 const added = addedIds.has(product.id);
-                const price = formatPrice(product.salePrice) ?? formatPrice(product.price);
+                const price = formatINR(product.salePrice) ?? formatINR(product.price);
                 return (
                   <li key={product.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="bg-muted size-11 shrink-0 overflow-hidden rounded-md border">
-                      {product.image && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={product.image} alt="" className="size-full object-cover" loading="lazy" />
-                      )}
-                    </div>
+                    <ProductThumb src={product.image} className="size-11" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{product.name}</div>
                       <div className="text-muted-foreground truncate text-xs">
@@ -122,8 +119,8 @@ export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
               })}
               {hasMore && (
                 <li className="p-3">
-                  <Button variant="ghost" className="w-full" onClick={loadMore} disabled={loading}>
-                    {loading && <Loader2 className="animate-spin" />} Load more
+                  <Button variant="ghost" className="w-full" onClick={loadMore} disabled={loadingMore}>
+                    {loadingMore && <Loader2 className="animate-spin" />} Load more
                   </Button>
                 </li>
               )}

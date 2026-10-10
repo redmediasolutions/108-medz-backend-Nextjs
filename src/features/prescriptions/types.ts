@@ -29,16 +29,7 @@ export type PrescriptionCustomer = {
   phone: string | null;
 };
 
-/** Product from janmanstore.in /wp-json/my-plugin/v1/backend-search */
-export type ProductSearchResult = {
-  id: number;
-  name: string;
-  price: string;
-  regularPrice: string;
-  salePrice: string;
-  salt: string;
-  productContent: string;
-  image: string | null;
-};
+/** Product search lives in features/products — re-exported for existing imports. */
+export type { Product as ProductSearchResult } from "@/features/products/types";
 
 export type PrescriptionStatusFilter = "all" | PrescriptionStatus;
