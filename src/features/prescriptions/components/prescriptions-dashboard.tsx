@@ -4,6 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ClipboardList, Search } from "lucide-react";
 
+import { DataPagination } from "@/components/data-pagination";
+import { paginate, useUrlPageState } from "@/hooks/use-pagination";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card } from "@/components/ui/card";
@@ -27,6 +29,17 @@ export function PrescriptionsDashboard() {
   const [status, setStatus] = React.useState<PrescriptionStatusFilter>("all");
 
   const filtered = React.useMemo(() => filterPrescriptions(data, query, status), [data, query, status]);
+  const pager = useUrlPageState(20);
+  const view = paginate(filtered, pager.page, pager.pageSize);
+  // New search / status → back to page 1
+  const filterKey = `${query}|${status}`;
+  const lastKey = React.useRef(filterKey);
+  React.useEffect(() => {
+    if (lastKey.current !== filterKey) {
+      lastKey.current = filterKey;
+      if (pager.page !== 1) pager.setPage(1);
+    }
+  }, [filterKey, pager]);
   const pendingCount = data.filter((p) => !p.isReady).length;
   const readyCount = data.length - pendingCount;
 
@@ -115,7 +128,7 @@ export function PrescriptionsDashboard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((p) => (
+              {view.items.map((p) => (
                 <TableRow
                   key={p.docId}
                   className="cursor-pointer"
@@ -141,10 +154,8 @@ export function PrescriptionsDashboard() {
           </Table>
         )}
       </Card>
-      {!loading && !error && data.length > 0 && (
-        <p className="text-muted-foreground mt-3 text-xs">
-          Showing {filtered.length} of {data.length}
-        </p>
+      {!loading && !error && filtered.length > 0 && (
+        <DataPagination className="mt-3" state={{ ...pager, page: view.page }} total={view.total} itemLabel={filtered.length === data.length ? "prescriptions" : `of ${data.length} prescriptions`} />
       )}
     </div>
   );

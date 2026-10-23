@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CalendarRange, Download, Loader2, Search, Users, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CalendarRange, Download, Phone, Search, Users, X } from "lucide-react";
 
+import { DataPagination } from "@/components/data-pagination";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -11,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useUrlPageState } from "@/hooks/use-pagination";
 import { formatDate } from "@/lib/format";
 import { timeAgo } from "@/lib/time-ago";
 
@@ -30,7 +33,8 @@ export function CustomersDashboard() {
   const [draft, setDraft] = React.useState<CustomerFilters>(EMPTY_FILTERS);
   const [filters, setFilters] = React.useState<CustomerFilters>(EMPTY_FILTERS);
   const [exportOpen, setExportOpen] = React.useState(false);
-  const { items, loading, loadingMore, hasMore, error, total, loadMore } = useCustomers(filters);
+  const pager = useUrlPageState(20);
+  const { items, loading, fetching, hasNext, error, total } = useCustomers(filters, pager.page, pager.pageSize);
 
   const dirty = draft.phone !== filters.phone || draft.from !== filters.from || draft.to !== filters.to;
   const active = Boolean(filters.phone || filters.from || filters.to);
@@ -40,10 +44,12 @@ export function CustomersDashboard() {
     e?.preventDefault();
     if (invalidRange) return;
     setFilters({ ...draft, phone: draft.phone.trim() });
+    pager.setPage(1);
   }
   function clear() {
     setDraft(EMPTY_FILTERS);
     setFilters(EMPTY_FILTERS);
+    pager.setPage(1);
   }
 
   const range = describeRange(filters.from, filters.to);
@@ -132,13 +138,24 @@ export function CustomersDashboard() {
             title="No customers found"
             description={
               filters.phone
-                ? `No customer with phone number ${filters.phone}.`
+                ? `No app account with phone number ${filters.phone}. They may only order by phone/office.`
                 : active
                   ? "Nobody joined in this date range."
                   : "Customers will appear here once they sign up."
             }
             action={
-              active ? (
+              filters.phone ? (
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button size="sm" asChild>
+                    <Link href={`/customers/lookup?phone=${encodeURIComponent(filters.phone)}`}>
+                      <Phone /> Check phone / WooCommerce orders
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={clear}>
+                    Clear filters
+                  </Button>
+                </div>
+              ) : active ? (
                 <Button variant="outline" size="sm" onClick={clear}>
                   Clear filters
                 </Button>
@@ -146,7 +163,7 @@ export function CustomersDashboard() {
             }
           />
         ) : (
-          <Table>
+          <Table className={fetching ? "opacity-60 transition-opacity" : "transition-opacity"}>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">Customer</TableHead>
@@ -192,17 +209,15 @@ export function CustomersDashboard() {
       </Card>
 
       {!loading && !error && items.length > 0 && (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <p className="text-muted-foreground text-xs">
-            Showing {items.length}
-            {total !== null ? ` of ${total.toLocaleString("en-IN")}` : ""}
-          </p>
-          {hasMore && (
-            <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-              {loadingMore && <Loader2 className="animate-spin" />} Load more
-            </Button>
-          )}
-        </div>
+        <DataPagination
+          className="mt-3"
+          state={pager}
+          total={total}
+          hasNext={hasNext}
+          pageItemCount={items.length}
+          fetching={fetching}
+          itemLabel="customers"
+        />
       )}
 
       <ExportCustomersDialog

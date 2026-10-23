@@ -3,6 +3,8 @@
 import * as React from "react";
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Clock, SlidersHorizontal, Undo2, Wallet } from "lucide-react";
 
+import { DataPagination } from "@/components/data-pagination";
+import { paginate, usePageState } from "@/hooks/use-pagination";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,6 +44,8 @@ export function CustomerRewardsTab({
 }) {
   const [mode, setMode] = React.useState<WalletDialogMode | null>(null);
   const { available, pending } = walletSummary(transactions);
+  const pager = usePageState(10);
+  const view = paginate(transactions, pager.page, pager.pageSize);
 
   return (
     <div className="grid gap-4">
@@ -79,7 +83,7 @@ export function CustomerRewardsTab({
           <EmptyState icon={Wallet} title="No wallet transactions yet" />
         ) : (
           <ul className="divide-y">
-            {transactions.map((tx) => {
+            {view.items.map((tx) => {
               const m = txMeta(tx);
               const Icon = m.icon;
               return (
@@ -104,6 +108,7 @@ export function CustomerRewardsTab({
             })}
           </ul>
         )}
+        {view.total > 10 && <DataPagination className="border-t px-4 py-3" state={{ ...pager, page: view.page }} total={view.total} itemLabel="transactions" />}
       </Card>
 
       <WalletAdjustDialog

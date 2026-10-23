@@ -1,6 +1,6 @@
 import { formatDate } from "@/lib/format";
 
-import type { Customer, CustomerOrder, WalletTransaction } from "../types";
+import type { Customer, WalletTransaction } from "../types";
 
 /** Same balance maths as CustomerRewardsScreen._rewardBalanceCard (Flutter). */
 export function walletSummary(transactions: WalletTransaction[]) {
@@ -12,34 +12,6 @@ export function walletSummary(transactions: WalletTransaction[]) {
     else if (tx.status === "debited" || tx.type === "debit") available -= tx.amount;
   }
   return { available: Math.max(0, available), pending };
-}
-
-export type Tone = "success" | "destructive" | "warning" | "neutral";
-
-/** Port of _statusColor in customer_orders.dart */
-export function orderStatusTone(status: string): Tone {
-  switch (status.toLowerCase()) {
-    case "completed":
-    case "delivered":
-      return "success";
-    case "cancelled":
-    case "canceled":
-      return "destructive";
-    case "processing":
-    case "packed":
-    case "shipped":
-      return "warning";
-    default:
-      return "neutral";
-  }
-}
-
-export function orderLabel(o: CustomerOrder) {
-  return o.wooOrderId ? `#${o.wooOrderId}` : `#${o.id.slice(0, 8)}`;
-}
-
-export function titleCase(s: string) {
-  return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export const CUSTOMER_CSV_HEADER = [

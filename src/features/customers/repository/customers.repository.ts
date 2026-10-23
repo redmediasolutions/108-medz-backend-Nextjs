@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getCountFromServer,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -28,7 +29,6 @@ import {
   mapAddress,
   mapCartItem,
   mapCustomer,
-  mapOrder,
   mapWalletTransaction,
 } from "../lib/customer-mapper";
 import { parseDateInput } from "../lib/customer-utils";
@@ -37,7 +37,6 @@ import type {
   Customer,
   CustomerAddress,
   CustomerFilters,
-  CustomerOrder,
   WalletAdjustment,
   WalletTransaction,
 } from "../types";
@@ -104,6 +103,21 @@ export const customersRepository = {
     return out;
   },
 
+  /** Find the Users doc for an order's customer: by doc id = uid, auth_uid field, then phone variants. */
+  async findCustomerId(by: { uid?: string; phone?: string }): Promise<string | null> {
+    if (by.uid) {
+      const direct = await getDoc(doc(db, COLLECTIONS.users, by.uid)).catch(() => null);
+      if (direct?.exists()) return direct.id;
+      const field = await getDocs(query(users(), where("auth_uid", "==", by.uid), limit(1))).catch(() => null);
+      if (field?.docs[0]) return field.docs[0].id;
+    }
+    if (by.phone && by.phone.replace(/\D/g, "").length >= 10) {
+      const snap = await getDocs(query(users(), where("phone_number", "in", phoneVariants(by.phone)), limit(1)));
+      if (snap.docs[0]) return snap.docs[0].id;
+    }
+    return null;
+  },
+
   subscribeCustomer(id: string, onData: (c: Customer | null) => void, onError: (e: Error) => void): Unsubscribe {
     return onSnapshot(
       doc(db, COLLECTIONS.users, id),
@@ -112,17 +126,6 @@ export const customersRepository = {
     );
   },
 
-  /** Orders where uid == authUid (sorted client-side, like Flutter — avoids a composite index). */
-  subscribeOrders(authUid: string, onData: (o: CustomerOrder[]) => void, onError: (e: Error) => void): Unsubscribe {
-    return onSnapshot(
-      query(collection(db, C.orders), where("uid", "==", authUid)),
-      (s) =>
-        onData(
-          s.docs.map(mapOrder).sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))
-        ),
-      onError
-    );
-  },
 
   subscribeCart(authUid: string, onData: (i: CartItem[]) => void, onError: (e: Error) => void): Unsubscribe {
     return onSnapshot(

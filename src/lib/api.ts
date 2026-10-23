@@ -11,12 +11,20 @@ export class ApiError extends Error {
   }
 }
 
+/** Firebase ID token of the signed-in admin, sent so /api routes can verify the caller. */
+async function authHeader(): Promise<Record<string, string>> {
+  if (typeof window === "undefined") return {};
+  const { auth } = await import("@/firebase/config");
+  const token = await auth.currentUser?.getIdToken().catch(() => null);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      headers: { "Content-Type": "application/json", ...(await authHeader()), ...(init?.headers ?? {}) },
     });
   } catch {
     throw new ApiError("Network error. Check your connection.", 0);

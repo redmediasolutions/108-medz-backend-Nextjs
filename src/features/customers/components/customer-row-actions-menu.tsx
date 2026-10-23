@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, MoreHorizontal, Package, ShoppingCart, User, Wallet } from "lucide-react";
+import { ClipboardList, CreditCard, MapPin, MoreHorizontal, Package, ShoppingCart, User, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,14 +14,16 @@ import {
 
 import type { Customer } from "../types";
 
-/** Same actions as the Flutter popup menu: cart, orders, rewards, addresses. */
+/** Flutter popup actions (cart, orders, rewards, addresses) plus payments and prescriptions. */
 export function CustomerRowActionsMenu({ customer }: { customer: Customer }) {
   const base = `/customers/${customer.id}`;
   const items = [
     { tab: "orders", label: "View orders", icon: Package },
+    { tab: "payments", label: "View payments", icon: CreditCard },
     { tab: "cart", label: "View cart", icon: ShoppingCart },
     { tab: "addresses", label: "View addresses", icon: MapPin },
     { tab: "rewards", label: "View rewards", icon: Wallet },
+    { tab: "prescriptions", label: "View prescriptions", icon: ClipboardList },
   ];
   return (
     <DropdownMenu>

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { CustomersDashboard } from "@/features/customers/components/customers-dashboard";
@@ -5,5 +6,9 @@ import { CustomersDashboard } from "@/features/customers/components/customers-da
 export const metadata: Metadata = { title: "Customers" };
 
 export default function CustomersPage() {
-  return <CustomersDashboard />;
+  return (
+    <Suspense>
+      <CustomersDashboard />
+    </Suspense>
+  );
 }

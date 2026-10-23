@@ -4,12 +4,14 @@ import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Loader2, PackageSearch, Search, X } from "lucide-react";
 
+import { DataPagination } from "@/components/data-pagination";
+
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUrlPageState } from "@/hooks/use-pagination";
 
 import { useProductSearch } from "../hooks/use-product-search";
 import { ProductCard } from "./product-card";
@@ -21,29 +23,19 @@ export function ProductsDashboard() {
   const searchParams = useSearchParams();
   const [query, setQuery] = React.useState(searchParams.get("q") ?? "");
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const { results, loading, loadingMore, error, hasMore, loadMore, searched, term, pending } = useProductSearch(query);
+  const pager = useUrlPageState(20);
+  const { results, loading, fetching, error, hasNext, searched, term, pending } = useProductSearch(query, pager.page);
 
-  // Keep ?q= in the URL so searches are shareable / survive reload.
+  // Keep ?q= in the URL so searches are shareable / survive reload. A new term starts at page 1.
   React.useEffect(() => {
     const current = searchParams.get("q") ?? "";
     if (term === current || (!searched && !current)) return;
     const params = new URLSearchParams(searchParams);
     if (searched) params.set("q", term);
     else params.delete("q");
+    params.delete("page");
     router.replace(`${pathname}${params.size ? `?${params}` : ""}`, { scroll: false });
   }, [term, searched, pathname, router, searchParams]);
-
-  // Infinite scroll (Flutter loaded the next page 200px before the bottom).
-  const sentinel = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    const el = sentinel.current;
-    if (!el || !hasMore) return;
-    const io = new IntersectionObserver((entries) => entries[0]?.isIntersecting && loadMore(), {
-      rootMargin: "200px",
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, loadMore]);
 
   // "/" focuses search
   React.useEffect(() => {
@@ -57,7 +49,7 @@ export function ProductsDashboard() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const busy = loading || pending;
+  const busy = fetching || pending;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -114,7 +106,7 @@ export function ProductsDashboard() {
             <Skeleton key={i} className="h-24 w-full rounded-xl" />
           ))}
         </div>
-      ) : results.length === 0 ? (
+      ) : results.length === 0 && pager.page === 1 ? (
         <Card>
           <EmptyState
             icon={PackageSearch}
@@ -125,25 +117,22 @@ export function ProductsDashboard() {
       ) : (
         <>
           <p className="text-muted-foreground mb-3 text-sm">
-            {results.length}
-            {hasMore ? "+" : ""} results for <span className="text-foreground font-medium">&ldquo;{term}&rdquo;</span>
+            Results for <span className="text-foreground font-medium">&ldquo;{term}&rdquo;</span>
           </p>
-          <div className="grid gap-3">
+          <div className={`grid gap-3 transition-opacity ${fetching ? "opacity-60" : ""}`}>
             {results.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}
           </div>
-          <div ref={sentinel} className="flex justify-center py-6">
-            {loadingMore ? (
-              <Loader2 className="text-muted-foreground size-5 animate-spin" />
-            ) : hasMore ? (
-              <Button variant="ghost" onClick={loadMore}>
-                Load more
-              </Button>
-            ) : (
-              <span className="text-muted-foreground text-xs">End of results</span>
-            )}
-          </div>
+          <DataPagination
+            className="mt-4"
+            state={pager}
+            hasNext={hasNext}
+            pageItemCount={results.length}
+            fetching={fetching}
+            itemLabel="products"
+            compact
+          />
         </>
       )}
     </div>

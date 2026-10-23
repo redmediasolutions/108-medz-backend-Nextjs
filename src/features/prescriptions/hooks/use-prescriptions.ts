@@ -1,56 +1,30 @@
 "use client";
 
-import * as React from "react";
+import { useFirestoreQuery } from "@/hooks/use-firestore-query";
+import { qk } from "@/lib/query-keys";
 
 import { prescriptionsService } from "../services/prescriptions.service";
 import type { Prescription } from "../types";
 
 /** Realtime list of active (non-archived) prescriptions. */
 export function usePrescriptions() {
-  const [data, setData] = React.useState<Prescription[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<Error | null>(null);
-
-  React.useEffect(() => {
-    return prescriptionsService.subscribeActive(
-      (list) => {
-        setData(list);
-        setError(null);
-        setLoading(false);
-      },
-      (e) => {
-        console.error("[prescriptions] stream error", e);
-        setError(e);
-        setLoading(false);
-      }
-    );
-  }, []);
-
-  return { data, loading, error };
+  const q = useFirestoreQuery<Prescription[]>(qk.prescriptions.active(), prescriptionsService.subscribeActive);
+  return { data: q.data ?? [], loading: q.isPending, error: q.error };
 }
 
 /** Realtime single prescription. `data === null` after loading means not found. */
 export function usePrescription(docId: string) {
-  const [data, setData] = React.useState<Prescription | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<Error | null>(null);
+  const q = useFirestoreQuery<Prescription | null>(qk.prescriptions.detail(docId), (ok, err) =>
+    prescriptionsService.subscribeById(docId, ok, err)
+  );
+  return { data: q.data ?? null, loading: q.isPending, error: q.error };
+}
 
-  React.useEffect(() => {
-    setLoading(true);
-    return prescriptionsService.subscribeById(
-      docId,
-      (p) => {
-        setData(p);
-        setError(null);
-        setLoading(false);
-      },
-      (e) => {
-        console.error("[prescription] stream error", e);
-        setError(e);
-        setLoading(false);
-      }
-    );
-  }, [docId]);
-
-  return { data, loading, error };
+/** Realtime prescriptions for one customer (Users/{id}). */
+export function useUserPrescriptions(userId: string | undefined) {
+  const q = useFirestoreQuery<Prescription[]>(
+    qk.prescriptions.byUser(userId ?? ""),
+    userId ? (ok, err) => prescriptionsService.subscribeByUser(userId, ok, err) : null
+  );
+  return { data: q.data ?? [], loading: q.isPending, error: q.error };
 }

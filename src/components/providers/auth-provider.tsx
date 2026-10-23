@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { auth } from "@/firebase/config";
 import { fetchAdminProfile, signOut, type AdminProfile } from "@/lib/auth";
@@ -24,10 +25,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null);
   const [profile, setProfile] = React.useState<AdminProfile | null>(null);
   const [accessError, setAccessError] = React.useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   React.useEffect(() => {
     return onAuthStateChanged(auth, async (fbUser) => {
       if (!fbUser) {
+        // Signed out → drop every cached customer / order so the next admin starts clean
+        queryClient.clear();
         setUser(null);
         setProfile(null);
         setStatus("unauthenticated");
@@ -52,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await signOut();
       }
     });
-  }, []);
+  }, [queryClient]);
 
   const value = React.useMemo<AuthContextValue>(
     () => ({ status, user, profile, accessError, signOut }),

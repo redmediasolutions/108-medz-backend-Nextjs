@@ -1,80 +1,41 @@
 "use client";
 
-import * as React from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { useDebounce } from "@/hooks/use-debounce";
+import { qk } from "@/lib/query-keys";
 
 import { productsService } from "../services/products.service";
 import { PRODUCTS_PAGE_SIZE, type Product } from "../types";
 
 /**
- * Debounced product search with paging (20 per page, like Flutter).
+ * Debounced, paginated product search (20 per page, like Flutter). Results are cached per
+ * term + page, so going back a page or re-typing a recent search is instant.
  * Shared by the Products page and the prescriptions "Add medicine" sheet.
  */
-export function useProductSearch(query: string, { minLength = 2, delay = 400 } = {}) {
-  const debounced = useDebounce(query.trim(), delay);
-  const [results, setResults] = React.useState<Product[]>([]);
-  const [page, setPage] = React.useState(1);
-  const [loading, setLoading] = React.useState(false);
-  const [loadingMore, setLoadingMore] = React.useState(false);
-  const [hasMore, setHasMore] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const loadingMoreRef = React.useRef(false);
+export function useProductSearch(query: string, page: number, { minLength = 2, delay = 400 } = {}) {
+  const term = useDebounce(query.trim(), delay);
+  const enabled = term.length >= minLength;
 
-  React.useEffect(() => {
-    if (debounced.length < minLength) {
-      setResults([]);
-      setHasMore(false);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setPage(1);
-    productsService
-      .search(debounced, 1)
-      .then((r) => {
-        if (cancelled) return;
-        setResults(r);
-        setHasMore(r.length === PRODUCTS_PAGE_SIZE);
-      })
-      .catch((e: Error) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced, minLength]);
+  const q = useQuery<Product[]>({
+    queryKey: qk.products.search(term.toLowerCase(), page),
+    queryFn: () => productsService.search(term, page),
+    enabled,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+  });
 
-  const loadMore = React.useCallback(async () => {
-    if (loadingMoreRef.current || !hasMore || loading) return;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    const nextPage = page + 1;
-    try {
-      const r = await productsService.search(debounced, nextPage);
-      setResults((prev) => [...prev, ...r.filter((x) => !prev.some((p) => p.id === x.id))]);
-      setHasMore(r.length === PRODUCTS_PAGE_SIZE);
-      setPage(nextPage);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
-    }
-  }, [debounced, page, hasMore, loading]);
-
+  const results = enabled ? (q.data ?? []) : [];
   return {
     results,
-    loading,
-    loadingMore,
-    error,
-    hasMore,
-    loadMore,
-    /** the query actually searched */
-    term: debounced,
-    searched: debounced.length >= minLength,
-    pending: query.trim() !== debounced,
+    /** first load for this term (nothing to show yet) */
+    loading: enabled && q.isPending,
+    /** a new page / term is loading while previous results stay on screen */
+    fetching: enabled && q.isFetching,
+    error: q.error ? (q.error as Error).message : null,
+    hasNext: results.length === PRODUCTS_PAGE_SIZE,
+    term,
+    searched: enabled,
+    pending: query.trim() !== term,
   };
 }

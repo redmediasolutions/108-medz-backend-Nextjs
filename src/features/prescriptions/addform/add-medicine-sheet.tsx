@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { ProductThumb } from "@/features/products/components/product-thumb";
 import { useProductSearch } from "@/features/products/hooks/use-product-search";
+import { usePageState } from "@/hooks/use-pagination";
+import { DataPagination } from "@/components/data-pagination";
 import { formatINR } from "@/lib/format";
 
 import { prescriptionsService } from "../services/prescriptions.service";
@@ -27,7 +29,8 @@ type Props = {
 export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
   const [query, setQuery] = React.useState("");
   const [adding, setAdding] = React.useState<number | null>(null);
-  const { results, loading, loadingMore, error, hasMore, loadMore, searched } = useProductSearch(query);
+  const pager = usePageState(20, query.trim());
+  const { results, loading, fetching, error, hasNext, searched } = useProductSearch(query, pager.page);
 
   React.useEffect(() => {
     if (!open) setQuery("");
@@ -62,7 +65,7 @@ export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
               placeholder="Search medicine name or salt"
               className="pl-9"
             />
-            {loading && (
+            {(loading || fetching) && (
               <Loader2 className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin" />
             )}
           </div>
@@ -117,16 +120,12 @@ export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
                   </li>
                 );
               })}
-              {hasMore && (
-                <li className="p-3">
-                  <Button variant="ghost" className="w-full" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore && <Loader2 className="animate-spin" />} Load more
-                  </Button>
-                </li>
-              )}
             </ul>
           )}
         </div>
+        {searched && !error && results.length > 0 && (
+          <DataPagination className="border-t p-3" state={pager} hasNext={hasNext} pageItemCount={results.length} fetching={fetching} itemLabel="results" compact />
+        )}
       </SheetContent>
     </Sheet>
   );

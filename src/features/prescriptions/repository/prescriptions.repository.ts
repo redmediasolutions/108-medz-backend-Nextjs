@@ -46,6 +46,21 @@ export const prescriptionsRepository = {
     );
   },
 
+  /** All prescriptions uploaded by one user (UserRef == Users/{id}), newest first, incl. archived. */
+  subscribeByUser(userId: string, onData: (list: Prescription[]) => void, onError: (e: Error) => void): Unsubscribe {
+    const q = query(collection(db, COLLECTIONS.prescriptions), where("UserRef", "==", doc(db, COLLECTIONS.users, userId)));
+    return onSnapshot(
+      q,
+      (snap) =>
+        onData(
+          snap.docs
+            .map(mapPrescriptionDoc)
+            .sort((a, b) => (b.uploadedTime?.getTime() ?? 0) - (a.uploadedTime?.getTime() ?? 0))
+        ),
+      onError
+    );
+  },
+
   /** Resolve the UserRef (e.g. "Users/abc123") → name + phone_number. */
   async getCustomer(userPath: string): Promise<PrescriptionCustomer | null> {
     const snap = await getDoc(doc(db, userPath));

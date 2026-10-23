@@ -22,43 +22,6 @@ export type CustomerFilters = {
   to: string;
 };
 
-export type OrderAddress = {
-  firstName: string;
-  phone: string;
-  address1: string;
-  address2: string;
-  city: string;
-  state: string;
-  postcode: string;
-  country: string;
-};
-
-export type OrderItem = {
-  productId: number;
-  name: string;
-  image: string;
-  quantity: number;
-  salePrice: number;
-  requiresPrescription: boolean;
-};
-
-/** Firestore Orders/{id} (subset used on the customer screen) — see pages/orders/order_model.dart */
-export type CustomerOrder = {
-  id: string;
-  wooOrderId: string;
-  status: string;
-  paymentMethod: string;
-  paymentStatus: string;
-  subtotal: number;
-  shipping: number;
-  walletUsed: number;
-  finalPayable: number;
-  createdAt: Date | null;
-  items: OrderItem[];
-  shippingAddress: OrderAddress;
-  billing: OrderAddress;
-};
-
 /** Firestore carts/{authUid}/items/{id} */
 export type CartItem = {
   id: string;

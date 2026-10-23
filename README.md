@@ -33,7 +33,32 @@ npm run dev                  # http://localhost:3000
   - **Addresses** — `Addresses where userRef in [Users/{uid} ref / string variants]` (Flutter downloaded the whole collection and filtered on the client)
   - **Rewards** — `Users/{id}/walletTransactions`, balance (same maths as Flutter), adjust points (credited / debited / pending), redeem for cash
 
-Sidebar entries for Search data and Orders are still stubbed as "Soon".
+## Phase 3 — Orders (WooCommerce + app) & full customer profile
+
+Orders live in two places:
+
+| Where | What | How it's read |
+| --- | --- | --- |
+| WooCommerce | **every** order: app, phone/office (staff create them in wp-admin, `created_via = admin`) and website (`checkout`) | `/api/woo/orders` (server-side, admin-only) |
+| Firebase `Orders` | app orders only, with wallet / COD charge / rewards / Razorpay ids. Doc id == `wooOrderId` once synced | Firestore |
+
+They are merged so each order shows **once**: a Woo order with a Firebase twin is an *App* order; without one it's *Phone / office* or *Website*. App orders that never reached WooCommerce show under **Not synced**.
+
+- **Orders** (`/orders`): source tabs (All · App · Phone/office · Website · Not synced), status, date range, search (order #, name, phone, email), Woo pagination.
+- **Order detail** (`/orders/[id]`): items (Rx flags), totals incl. COD charge and wallet, payment (method, status, paid date, transaction / Razorpay ids), addresses, customer note + WooCommerce order notes, link to wp-admin.
+- **Customer profile** (`/customers/[id]`): lifetime spend, orders by source, amount due, wallet; tabs **Orders** (app + Woo, matched by phone/email) · **Payments** · Cart · Addresses · Rewards · **Prescriptions**.
+- **Phone-only customers** (`/customers/lookup?phone=…`): people who never used the app get a profile built from their WooCommerce orders. Every customer name on an order links here; it jumps to the app profile when one matches.
+
+### Security
+
+`/api/woo/*` checks the caller's Firebase ID token (Auth REST) and `Users/{uid}.isAdmin` (Firestore REST, as that user) before calling WooCommerce. Woo keys are server-only env vars (`WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`).
+
+### Known limits
+
+- Woo search for a customer uses the last 10 digits of their phone and their email. Numbers stored in Woo with spaces (e.g. `98450 12340`) won't match by phone.
+- In the App / Not synced views, search and filters apply to the app orders loaded so far (Load more to go further back).
+
+Sidebar entry for Search data is still stubbed as "Soon".
 
 ### Firestore indexes
 
@@ -74,6 +99,14 @@ src/
     repository/  customers.repository.ts
     services/    customers.service.ts
     types.ts
+  features/orders/
+    components/  orders-dashboard, orders-table, order-detail, order-badges, customer-link
+    hooks/       use-orders.ts, use-customer-orders.ts
+    lib/         woo-mapper.ts (server+client), app-order-mapper.ts, merge-orders.ts, order-utils.ts
+    repository/  orders.repository.ts   # /api/woo + Firestore Orders
+    services/    orders.service.ts
+    types.ts
+  lib/server/    woo.ts, require-admin.ts, route-error.ts   # used only by app/api/**
   features/prescriptions/
     addform/     add-medicine-sheet.tsx
     components/  prescriptions-dashboard, prescription-detail, medicines-table, medicine-row,
@@ -115,3 +148,51 @@ src/
 - The old `/rewards` page (lowercase `users` collection, `rewardTransactions`) wasn't in the Flutter sidebar and looks legacy, so it wasn't ported.
 - The admin check is client-side (as in Flutter). Firestore security rules should also require `isAdmin` for writes to `Prescription`.
 - `lib/services/config.dart` in the Flutter app ships WooCommerce consumer key/secret inside the app bundle. They are **not** used by search and were not copied here; consider rotating them.
+
+## Phase 4 — Areas (pincodes) & same-person matching
+
+People often order from several phones / app accounts (or call the office from another number). **Areas** (`/pincodes`) groups every order (WooCommerce + app) by delivery pincode and merges identities into real people:
+
+- **By pincode**: orders, real people, revenue, avg order, app / phone / website split, last order; CSV export; ranges 30d / 90d / 12m / all time.
+- **Same person, many phones**: everyone using more than one phone or app account, with every phone, account, name variant and address they've used, and *why* they were linked.
+- **Pincode page** (`/pincodes/[pin]`): people, orders and top products for that area.
+- **Customer profiles** show an **"Also orders as"** card listing the other phones / accounts / names that look like the same person.
+
+How people are matched (`features/pincodes/lib/cluster.ts`):
+
+| Link | Rule |
+| --- | --- |
+| Same phone / email / app account | exact (last 10 digits for phones) |
+| Same address | same meaningful address words in the same pincode (filler like "near", "road", "flat", "apartments" ignored) |
+| Similar address | ≥ 75% word overlap **and** ≥ 2 shared words, same pincode |
+| Same name, nearby | identical name + ≥ 40% address overlap, same pincode |
+
+Guards: never across pincodes for address links; a street name alone ("Car Street") never links; different house / flat numbers never link. Family members at one address will group together — the UI says so.
+
+Data: `/api/woo/orders/all` pages through WooCommerce (100/page, 5 in parallel, max 6,000, cached 5 min); app orders via Firestore `createdAt` range.
+
+## Data loading — TanStack Query
+
+All reads go through **TanStack Query v5** (`@tanstack/react-query`), wired in `components/providers/query-provider.tsx` (devtools in development only).
+
+| Piece | Where |
+| --- | --- |
+| Client defaults (1 min stale, no refetch on focus, no retry on 400/401/403/404) | `lib/query-client.ts` |
+| Every query key | `lib/query-keys.ts` (hierarchical: invalidate `["orders"]` to refresh all order queries) |
+| Firestore realtime → cache bridge | `hooks/use-firestore-query.ts` — first snapshot resolves the query, a live listener keeps it updated via `setQueryData` |
+| Pagination | `hooks/use-pagination.ts` (`usePageState`, `useUrlPageState`, `paginate`) + `components/data-pagination.tsx` |
+
+The cache is cleared on sign-out. Pages keep showing the previous page while the next one loads (`placeholderData: keepPreviousData`).
+
+### Pagination everywhere
+
+| List | Type | Page in URL |
+| --- | --- | --- |
+| Orders — All / Phone / Website | server (WooCommerce pages, 25/50/100) | ✓ |
+| Orders — App / Not synced | client (app orders since From date, default 12 months) + live Woo status per page | ✓ |
+| Customers | server (Firestore cursor chain + total count; phone search = single page) | ✓ |
+| Products | server (store search, 20 per page) | ✓ |
+| Prescriptions | client (realtime list) | ✓ |
+| Areas — pincodes / people, Pincode — people / orders | client | – |
+| Customer profile — orders, payments, wallet, prescriptions | client (10 per page) | – |
+| Add-medicine sheet | server (20 per page) | – |

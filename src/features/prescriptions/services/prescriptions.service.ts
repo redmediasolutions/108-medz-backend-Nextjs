@@ -55,6 +55,8 @@ export const prescriptionsService = {
     );
   },
 
+  subscribeByUser: repo.subscribeByUser,
+
   async addMedicine(prescription: Prescription, product: ProductSearchResult) {
     if (prescription.items.some((i) => i.productId === product.id)) {
       throw new Error(`${product.name} is already on this prescription`);
