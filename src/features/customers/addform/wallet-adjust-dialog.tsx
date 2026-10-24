@@ -23,7 +23,7 @@ import type { WalletAdjustment } from "../types";
 
 export type WalletDialogMode = "adjust" | "redeem";
 
-/** Port of _openAdjustDialog / _openRedeemDialog in customer_rewards_screen.dart */
+/** Port of _openAdjustDialog / _openRedeemDialog in customer_rewards_screen.dart TEXT */
 export function WalletAdjustDialog({
   mode,
   onOpenChange,
