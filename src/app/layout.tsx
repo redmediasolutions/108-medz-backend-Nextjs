@@ -12,9 +12,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // suppressHydrationWarning on <body>: browser extensions (e.g. ColorZilla) add attributes before React loads
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans`}>
+      <body className={`${inter.variable} font-sans`} suppressHydrationWarning>
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

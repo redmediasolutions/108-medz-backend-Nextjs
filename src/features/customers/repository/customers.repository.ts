@@ -111,7 +111,7 @@ export const customersRepository = {
       const field = await getDocs(query(users(), where("auth_uid", "==", by.uid), limit(1))).catch(() => null);
       if (field?.docs[0]) return field.docs[0].id;
     }
-    if (by.phone && by.phone.replace(/\D/g, "").length >= 10) {
+    if (by.phone && phoneVariants(by.phone).length > 1) {
       const snap = await getDocs(query(users(), where("phone_number", "in", phoneVariants(by.phone)), limit(1)));
       if (snap.docs[0]) return snap.docs[0].id;
     }

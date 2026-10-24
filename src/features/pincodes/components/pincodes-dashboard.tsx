@@ -21,7 +21,7 @@ import { timeAgo } from "@/lib/time-ago";
 import { cn } from "@/lib/utils";
 
 import { useAreaData } from "../hooks/use-area-data";
-import { phoneKey } from "../lib/normalize";
+import { phoneKeys } from "../lib/normalize";
 import { RANGE_LABEL, UNKNOWN_PINCODE, type RangePreset } from "../types";
 import { PersonClusterCard } from "./person-cluster-card";
 import { RangeTabs, readRange } from "./range-tabs";
@@ -72,7 +72,7 @@ export function PincodesDashboard() {
   const known = data?.stats.filter((s) => s.pincode !== UNKNOWN_PINCODE) ?? [];
   const unknown = data?.stats.find((s) => s.pincode === UNKNOWN_PINCODE);
   const totalOrders = data?.orders.length ?? 0;
-  const phoneCount = data ? new Set(data.orders.map((o) => phoneKey(o.customer.phone)).filter(Boolean)).size : 0;
+  const phoneCount = data ? new Set(data.orders.flatMap((o) => phoneKeys(o.customer.phone))).size : 0;
   const multiPeople = data?.clusters.filter((c) => c.multiIdentity).length ?? 0;
   const maxOrders = Math.max(1, ...stats.map((s) => s.orders));
   const areaPager = usePageState(25, [range, q, onlyMulti]);

@@ -10,7 +10,7 @@ import {
   numberTokens,
   orderAddress,
   orderPincode,
-  phoneKey,
+  phoneKeys,
 } from "./normalize";
 
 /** Thresholds — tuned to prefer missing a link over merging two different families. */
@@ -84,7 +84,7 @@ export function clusterPeople(orders: UnifiedOrder[]): PersonCluster[] {
       tokens: addressTokens(addr),
       addrKey: addressKey(addr),
       name: normName(o.customer.name),
-      phones: [o.customer.phone, o.billing.phone, o.shippingAddress.phone].map(phoneKey).filter((p) => p.length === 10),
+      phones: [...new Set([o.customer.phone, o.billing.phone, o.shippingAddress.phone].flatMap(phoneKeys))],
     };
   });
 

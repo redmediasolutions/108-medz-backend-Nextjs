@@ -196,3 +196,29 @@ The cache is cleared on sign-out. Pages keep showing the previous page while the
 | Areas — pincodes / people, Pincode — people / orders | client | – |
 | Customer profile — orders, payments, wallet, prescriptions | client (10 per page) | – |
 | Add-medicine sheet | server (20 per page) | – |
+
+## Firestore rules needed for the admin
+
+The admin reads customers' carts (`carts/{uid}/items`). If the Cart tab says *"Firestore security rules don't allow admins…"*, add an admin check to the rules (Firebase console → Firestore → Rules). Keep your existing rules and add the `isAdmin()` helper plus the `carts` match:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/Users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    match /carts/{uid}/items/{itemId} {
+      allow read, write: if request.auth != null && (request.auth.uid == uid || isAdmin());
+    }
+  }
+}
+```
+
+The same `isAdmin()` check is worth adding to `Orders`, `Users`, `Prescription`, `Addresses` and `Users/{id}/walletTransactions` writes, since the admin check in this app runs in the browser.
+
+## Phone matching
+
+WooCommerce stores phones however staff typed them (`9845012340`, `98450 12340`, `+91…`, `A / B`). `lib/format.ts → phoneKeys()` extracts every 10-digit number; customer profiles and the Orders search look orders up by the last 4 digits and then keep exact number matches. Known gap: numbers typed as `9845 012 340` or `98450 12 340` (last 4 digits not together) aren't found by WooCommerce search (~1% of orders).

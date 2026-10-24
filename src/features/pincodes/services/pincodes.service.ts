@@ -3,7 +3,7 @@ import type { AppOrder, UnifiedOrder } from "@/features/orders/types";
 
 import { aggregateByPincode, rangeStart, toInputDate } from "../lib/aggregate";
 import { clusterPeople, clustersForOrders } from "../lib/cluster";
-import { orderPincode, phoneKey } from "../lib/normalize";
+import { orderPincode, phoneKeys } from "../lib/normalize";
 import { pincodesRepository as repo } from "../repository/pincodes.repository";
 import type { PersonCluster, PincodeStat, RangePreset } from "../types";
 
@@ -84,7 +84,7 @@ export const pincodesService = {
 
     // If the customer's own orders landed in several clusters, report the biggest
     const cluster = mineClusters.sort((a, b) => b.orderCount - a.orderCount)[0];
-    const myPhones = new Set(mine.flatMap((o) => [o.customer.phone, o.billing.phone, o.shippingAddress.phone].map(phoneKey)));
+    const myPhones = new Set(mine.flatMap((o) => [o.customer.phone, o.billing.phone, o.shippingAddress.phone].flatMap(phoneKeys)));
     const myUids = new Set(mine.map((o) => o.customer.uid).filter(Boolean));
     const myNames = new Set(mine.map((o) => o.customer.name.toLowerCase()));
     const myEmails = new Set(mine.map((o) => o.customer.email.toLowerCase()).filter(Boolean));
@@ -93,7 +93,7 @@ export const pincodesService = {
     const others: LinkedIdentity[] = [
       ...cluster.phones
         .filter((p) => !myPhones.has(p))
-        .map((p) => ({ kind: "phone" as const, value: p, orders: countBy((o) => phoneKey(o.customer.phone) === p || phoneKey(o.shippingAddress.phone) === p) })),
+        .map((p) => ({ kind: "phone" as const, value: p, orders: countBy((o) => [o.customer.phone, o.shippingAddress.phone].flatMap(phoneKeys).includes(p)) })),
       ...cluster.accounts
         .filter((u) => !myUids.has(u))
         .map((u) => ({ kind: "account" as const, value: u, orders: countBy((o) => o.customer.uid === u) })),

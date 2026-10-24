@@ -109,6 +109,9 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
   }
 
   const cartCount = cart.data.reduce((s, i) => s + i.quantity, 0);
+  // Many app users never fill in a name — fall back to the name on their latest order
+  const orderName = orders.orders.find((o) => o.customer.name && o.customer.name !== "Unknown")?.customer.name ?? "";
+  const displayName = c.name || orderName;
   const facts = [
     { label: "Phone", value: c.phone || "-" },
     { label: "Email", value: c.email || "-" },
@@ -122,10 +125,15 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
 
       <Card className="mb-6 gap-5 px-5 py-5 sm:px-6">
         <div className="flex flex-wrap items-start gap-4">
-          <CustomerAvatar name={c.name} photoUrl={c.photoUrl} className="size-14 text-base" />
+          <CustomerAvatar name={displayName} photoUrl={c.photoUrl} className="size-14 text-base" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold tracking-tight">{c.name || "Unnamed customer"}</h1>
+              <h1 className="truncate text-xl font-semibold tracking-tight">{displayName || "Unnamed customer"}</h1>
+              {!c.name && orderName && (
+                <span className="text-muted-foreground text-xs" title="No name on the app profile — taken from their latest order">
+                  (from orders)
+                </span>
+              )}
               <CustomerTypeBadge customer={c} />
               {c.isAdmin && <CustomerRoleBadge customer={c} />}
             </div>
@@ -194,7 +202,7 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         <TabsContent value="rewards">
           <CustomerRewardsTab
             userId={c.id}
-            customerName={c.name}
+            customerName={displayName}
             transactions={wallet.data}
             loading={wallet.loading}
             error={wallet.error}

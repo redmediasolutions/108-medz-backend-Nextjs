@@ -67,11 +67,8 @@ export function addressLines(a: OrderAddress) {
   ].filter(Boolean);
 }
 
-/** Last 10 digits — how phones are compared across Firebase and Woo. */
-export function phoneKey(phone: string) {
-  const d = (phone || "").replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : d;
-}
+/** Phones are compared by 10-digit number — see lib/format phoneKeys(). */
+export { phoneKey, phoneKeys } from "@/lib/format";
 
 /** Totals for a customer's order history (cancelled / failed excluded from spend). */
 export function summarizeOrders(orders: UnifiedOrder[]) {

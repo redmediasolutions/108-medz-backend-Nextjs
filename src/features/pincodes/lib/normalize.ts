@@ -6,10 +6,7 @@ export function normPincode(v: string | number | null | undefined): string | nul
   return /^[1-9]\d{5}$/.test(d) ? d : null;
 }
 
-export function phoneKey(v: string) {
-  const d = (v || "").replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : "";
-}
+export { phoneKey, phoneKeys } from "@/lib/format";
 
 const TITLES = new Set(["mr", "mrs", "ms", "miss", "dr", "shri", "smt", "sri", "kum"]);
 

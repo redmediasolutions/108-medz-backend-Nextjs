@@ -101,7 +101,15 @@ export function CustomerCartTab({
   if (error) {
     return (
       <Card>
-        <EmptyState icon={AlertTriangle} title="Could not load cart" description={error.message} />
+        <EmptyState
+          icon={AlertTriangle}
+          title="Could not load cart"
+          description={
+            /permission/i.test(error.message)
+              ? "Firestore security rules don't allow admins to read customer carts yet. Update the rules for carts/{uid}/items (see README → Firestore rules)."
+              : error.message
+          }
+        />
       </Card>
     );
   }

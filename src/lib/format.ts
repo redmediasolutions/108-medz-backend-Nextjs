@@ -30,16 +30,44 @@ export function initials(name: string | null | undefined, fallback = "?") {
     .toUpperCase();
 }
 
-/** "+919876543210" / "919876543210" / "9876543210" → all variants to match Firestore phone_number. */
+/**
+ * Every 10-digit mobile number in a free-text phone field. Handles the formats staff actually type in
+ * WooCommerce: "9845012340", "98450 12340", "984 501 2340", "+91 98450-12340", ":9845012340",
+ * and two numbers in one field ("9845012340 / 9886011111").
+ */
+export function phoneKeys(raw: string | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const part of String(raw ?? "").split(/[\/,;|&]|\bor\b/i)) {
+    const d = part.replace(/\D/g, "");
+    if (d.length === 20) {
+      out.add(d.slice(0, 10));
+      out.add(d.slice(10));
+    } else if (d.length >= 10) {
+      out.add(d.slice(-10));
+    }
+  }
+  return [...out];
+}
+
+/** The first (main) 10-digit number in a phone field, or "" when there is none. */
+export function phoneKey(raw: string | null | undefined): string {
+  return phoneKeys(raw)[0] ?? "";
+}
+
+/** True when two free-text phone fields share any number. */
+export function samePhone(a: string, b: string) {
+  const bs = new Set(phoneKeys(b));
+  return phoneKeys(a).some((k) => bs.has(k));
+}
+
+/** All the ways a number may be stored in Firestore Users.phone_number (exact-match queries). */
 export function phoneVariants(input: string): string[] {
   const raw = input.trim();
-  const digits = raw.replace(/\D/g, "");
-  const ten = digits.length > 10 ? digits.slice(-10) : digits;
-  const set = new Set<string>([raw]);
-  if (ten.length === 10) {
-    set.add(ten);
-    set.add(`+91${ten}`);
-    set.add(`91${ten}`);
+  const set = new Set<string>(raw ? [raw] : []);
+  for (const k of phoneKeys(raw)) {
+    set.add(k);
+    set.add(`+91${k}`);
+    set.add(`91${k}`);
   }
-  return [...set].filter(Boolean);
+  return [...set].slice(0, 30);
 }
