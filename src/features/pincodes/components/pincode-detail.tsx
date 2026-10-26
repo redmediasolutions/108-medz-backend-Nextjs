@@ -18,7 +18,7 @@ import { formatDate, formatINRStrict } from "@/lib/format";
 import { useAreaData } from "../hooks/use-area-data";
 import { topProducts } from "../lib/aggregate";
 import { orderPincode } from "../lib/normalize";
-import { RANGE_LABEL } from "../types";
+import { RANGE_LABEL, UNKNOWN_PINCODE } from "../types";
 import { PersonClusterCard } from "./person-cluster-card";
 import { RangeTabs, readRange } from "./range-tabs";
 import { SourceLegend, SourceSplit } from "./source-split";
@@ -32,7 +32,8 @@ export function PincodeDetail({ pincode }: { pincode: string }) {
   const pathname = usePathname();
   const sp = useSearchParams();
   const range = readRange(sp.get("range"));
-  const tab: Tab = TABS.includes(sp.get("tab") as Tab) ? (sp.get("tab") as Tab) : "people";
+  const defaultTab: Tab = pincode === UNKNOWN_PINCODE ? "orders" : "people";
+  const tab: Tab = TABS.includes(sp.get("tab") as Tab) ? (sp.get("tab") as Tab) : defaultTab;
   const [onlyMulti, setOnlyMulti] = React.useState(false);
   const { data, loading, error } = useAreaData(range);
 
@@ -44,7 +45,11 @@ export function PincodeDetail({ pincode }: { pincode: string }) {
   }
 
   const stat = data?.stats.find((s) => s.pincode === pincode);
-  const orders = React.useMemo(() => data?.orders.filter((o) => orderPincode(o) === pincode) ?? [], [data, pincode]);
+  const isUnknown = pincode === UNKNOWN_PINCODE;
+  const orders = React.useMemo(
+    () => data?.orders.filter((o) => (isUnknown ? orderPincode(o) === null : orderPincode(o) === pincode)) ?? [],
+    [data, pincode, isUnknown]
+  );
   const people = React.useMemo(() => {
     if (!data) return [];
     const keys = new Set(orders.map((o) => o.key));
@@ -69,10 +74,22 @@ export function PincodeDetail({ pincode }: { pincode: string }) {
       {back}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-mono text-2xl font-semibold tracking-tight">{pincode}</h1>
-          <p className="text-muted-foreground text-sm">
-            {stat ? [stat.city, stat.state].filter(Boolean).join(", ") || "Area" : loading ? "Loading…" : "No orders in this range"}
-          </p>
+          {isUnknown ? (
+            <>
+              <h1 className="text-2xl font-semibold tracking-tight">Orders without a pincode</h1>
+              <p className="text-muted-foreground max-w-xl text-sm">
+                The pincode field was left empty (or holds something else, like a phone number) and no pincode is written in the
+                address. Add it in WooCommerce — use “Open in WooCommerce” on each order — and it will count toward its area.
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="font-mono text-2xl font-semibold tracking-tight">{pincode}</h1>
+              <p className="text-muted-foreground text-sm">
+                {stat ? [stat.city, stat.state].filter(Boolean).join(", ") || "Area" : loading ? "Loading…" : "No orders in this range"}
+              </p>
+            </>
+          )}
         </div>
         <RangeTabs value={range} onChange={(r) => setParam("range", r === "90d" ? null : r)} />
       </div>
@@ -125,7 +142,7 @@ export function PincodeDetail({ pincode }: { pincode: string }) {
             />
           </div>
 
-          <Tabs value={tab} onValueChange={(t) => setParam("tab", t === "people" ? null : t)}>
+          <Tabs value={tab} onValueChange={(t) => setParam("tab", t === defaultTab ? null : t)}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <TabsList>
                 <TabsTrigger value="people">

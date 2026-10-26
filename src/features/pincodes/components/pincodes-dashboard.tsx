@@ -245,15 +245,21 @@ export function PincodesDashboard() {
                       return (
                         <TableRow
                           key={s.pincode}
-                          className={cn(!unknownRow && "cursor-pointer")}
-                          onClick={() => !unknownRow && router.push(`/pincodes/${s.pincode}${range !== "90d" ? `?range=${range}` : ""}`)}
+                          className={cn("cursor-pointer", unknownRow && "bg-warning/5")}
+                          onClick={() => router.push(`/pincodes/${s.pincode}${range !== "90d" ? `?range=${range}` : ""}`)}
                         >
                           <TableCell className="pl-4 font-mono font-semibold">
-                            {unknownRow ? <span className="text-muted-foreground font-sans font-normal italic">No pincode</span> : s.pincode}
+                            {unknownRow ? <span className="text-warning font-sans font-medium">No pincode</span> : s.pincode}
                           </TableCell>
                           <TableCell>
-                            <div className="max-w-44 truncate">{s.city || "—"}</div>
-                            {s.state && <div className="text-muted-foreground text-xs">{s.state}</div>}
+                            {unknownRow ? (
+                              <div className="text-muted-foreground text-xs">Pincode missing on the order — click to fix</div>
+                            ) : (
+                              <>
+                                <div className="max-w-44 truncate">{s.city || "—"}</div>
+                                {s.state && <div className="text-muted-foreground text-xs">{s.state}</div>}
+                              </>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

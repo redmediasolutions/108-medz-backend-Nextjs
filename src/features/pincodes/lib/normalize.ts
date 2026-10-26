@@ -63,9 +63,30 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
   return inter / (a.size + b.size - inter);
 }
 
-/** Pincode an order was delivered to (shipping first, then billing). */
-export function orderPincode(o: { shippingAddress: OrderAddress; billing: OrderAddress }): string | null {
-  return normPincode(o.shippingAddress.postcode) ?? normPincode(o.billing.postcode);
+/** A 6-digit pincode written inside address text ("… Kochi 683563", "683 563"). Never part of a longer number (phones). */
+export function pincodeInText(text: string): string | null {
+  const m = text.match(/(?<!\d)([1-9]\d{2})\s?(\d{3})(?!\d)/);
+  return m ? m[1] + m[2] : null;
+}
+
+type WithAddresses = { shippingAddress: OrderAddress; billing: OrderAddress };
+
+/**
+ * Pincode an order was delivered to: shipping pincode → billing pincode → a pincode staff typed
+ * into the address lines instead of the pincode field. `fromAddress` says which.
+ */
+export function orderPincodeInfo(o: WithAddresses): { pin: string | null; fromAddress: boolean } {
+  const field = normPincode(o.shippingAddress.postcode) ?? normPincode(o.billing.postcode);
+  if (field) return { pin: field, fromAddress: false };
+  for (const a of [o.shippingAddress, o.billing]) {
+    const pin = pincodeInText([a.address1, a.address2, a.city, a.state].join(" "));
+    if (pin) return { pin, fromAddress: true };
+  }
+  return { pin: null, fromAddress: false };
+}
+
+export function orderPincode(o: WithAddresses): string | null {
+  return orderPincodeInfo(o).pin;
 }
 
 export function orderAddress(o: { shippingAddress: OrderAddress; billing: OrderAddress }): OrderAddress {
