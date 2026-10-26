@@ -6,16 +6,17 @@ import { orderAddress, orderPincode } from "./normalize";
 
 const DEAD = new Set(["cancelled", "canceled", "failed", "refunded"]);
 
+/** Most frequent value, ignoring case and stray spaces ("karnataka " = "Karnataka"); returned in Title Case. */
 function mostCommon(values: string[]) {
   const m = new Map<string, number>();
   for (const v of values) {
-    const k = v.trim();
+    const k = v.trim().replace(/\s+/g, " ").toLowerCase();
     if (k) m.set(k, (m.get(k) ?? 0) + 1);
   }
   let best = "";
   let n = 0;
   for (const [k, c] of m) if (c > n) [best, n] = [k, c];
-  return best;
+  return best.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 export function topProducts(orders: UnifiedOrder[], limit = 5): ProductCount[] {
