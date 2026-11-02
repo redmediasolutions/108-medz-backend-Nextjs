@@ -146,6 +146,11 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
               {c.authUid} <Copy className="size-3" />
             </button>
           </div>
+          <Button asChild>
+            <Link href={`/orders/new?customer=${encodeURIComponent(c.id)}`}>
+              <ShoppingCart /> New order
+            </Link>
+          </Button>
         </div>
         <CustomerInsights
           orders={orders.orders}

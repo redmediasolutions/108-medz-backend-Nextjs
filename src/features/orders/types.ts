@@ -90,6 +90,8 @@ export type AppOrder = {
   items: OrderLineItem[];
   billing: OrderAddress;
   shippingAddress: OrderAddress;
+  /** staff member who placed it from the CRM ("office" orders); null for real app orders */
+  placedBy: string | null;
 };
 
 export type OrderSource = "app" | "phone" | "website" | "other";
@@ -147,6 +149,8 @@ export type UnifiedOrder = {
   shippingAddress: OrderAddress;
   items: OrderLineItem[];
   customerNote: string;
+  /** office staff who placed it from the CRM */
+  placedBy: string | null;
 };
 
 export type OrdersSourceFilter = "all" | "app" | "phone" | "website" | "unsynced";
@@ -161,3 +165,35 @@ export type OrderFilters = {
 };
 
 export const ORDERS_PAGE_SIZE = 25;
+
+/* ---------------- Staff ("office") orders created from the CRM ---------------- */
+
+export type StaffOrderAddress = {
+  name: string;
+  /** 10-digit mobile number */
+  phone: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  postcode: string;
+};
+
+/** Body of POST /api/orders/create. Prices are re-read from WooCommerce on the server. */
+export type StaffOrderInput = {
+  /** Firebase auth uid of an app user (orders show in their app), or null for a new caller */
+  uid: string | null;
+  address: StaffOrderAddress;
+  items: { productId: number; quantity: number }[];
+  payment: { mode: "cod" | "cash" | "upi"; reference: string };
+  note: string;
+  /** random id per form submit — a double click / retry returns the first result */
+  clientRef: string;
+};
+
+export type StaffOrderResult = {
+  wooOrderId: number;
+  finalPayable: number;
+  /** set when WooCommerce's own total differs from the app formula */
+  warning?: string;
+};

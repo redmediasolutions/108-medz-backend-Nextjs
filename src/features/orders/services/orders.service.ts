@@ -2,7 +2,9 @@ import { mergeOrder, mergeOrderLists } from "../lib/merge-orders";
 import { phoneKeys } from "../lib/order-utils";
 import type { WooListParams } from "../repository/orders.repository";
 import { ordersRepository as repo } from "../repository/orders.repository";
-import type { AppOrder, OrderFilters, UnifiedOrder, WooOrder, WooOrderNote } from "../types";
+import { api } from "@/lib/api";
+
+import type { AppOrder, OrderFilters, StaffOrderInput, StaffOrderResult, UnifiedOrder, WooOrder, WooOrderNote } from "../types";
 import { ORDERS_PAGE_SIZE } from "../types";
 
 
@@ -145,4 +147,7 @@ export const ordersService = {
 
   subscribeAppByUid: repo.subscribeAppByUid,
   merge: mergeOrderLists,
+
+  /** Office staff order → WooCommerce + Firestore Orders/{wooId}, exactly like an app order. */
+  createStaffOrder: (input: StaffOrderInput) => api.post<StaffOrderResult>("/api/orders/create", input),
 };

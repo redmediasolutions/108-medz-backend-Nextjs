@@ -69,5 +69,6 @@ export function mapAppOrder(snap: DocumentSnapshot): AppOrder {
     items: Array.isArray(d.items) ? d.items.map(item) : [],
     billing: addr(d.billing),
     shippingAddress: addr(d.shippingAddress),
+    placedBy: d.source === "office" ? s(o(d.placedBy).name) || "Office staff" : null,
   };
 }

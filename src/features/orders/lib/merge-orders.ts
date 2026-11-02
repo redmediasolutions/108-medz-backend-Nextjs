@@ -18,6 +18,8 @@ const hasAddr = (a?: OrderAddress) => Boolean(a && (a.address1 || a.firstName ||
 const fullName = (a: OrderAddress) => [a.firstName, a.lastName].filter(Boolean).join(" ").trim();
 
 function sourceOf(woo: WooOrder | null, app: AppOrder | null): OrderSource {
+  // placed by office staff from this CRM (saved like an app order, but it's a phone order)
+  if (app?.placedBy) return "phone";
   if (app) return "app";
   switch (woo?.createdVia) {
     case "admin":
@@ -101,6 +103,7 @@ export function mergeOrder(woo: WooOrder | null, app: AppOrder | null): UnifiedO
     // Woo line items are authoritative (staff may edit); fall back to app items
     items: woo?.items.length ? woo.items.map((i) => ({ ...i, requiresPrescription: app?.items.find((a) => a.productId === i.productId)?.requiresPrescription ?? false })) : (app?.items ?? []),
     customerNote: woo?.customerNote ?? "",
+    placedBy: app?.placedBy ?? null,
   };
 }
 

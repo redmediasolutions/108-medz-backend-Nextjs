@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Receipt, Search, X } from "lucide-react";
+import { AlertTriangle, Plus, Receipt, Search, X } from "lucide-react";
 
 import { DataPagination } from "@/components/data-pagination";
 
@@ -121,6 +122,13 @@ export function OrdersDashboard() {
             : appMode
               ? `${appFiltered.length.toLocaleString("en-IN")} ${filters.source === "unsynced" ? "app orders not in WooCommerce" : "app orders"}.`
               : "App orders from Firebase and phone/office orders from WooCommerce, in one list."
+        }
+        actions={
+          <Button asChild>
+            <Link href="/orders/new">
+              <Plus /> New order
+            </Link>
+          </Button>
         }
       />
 

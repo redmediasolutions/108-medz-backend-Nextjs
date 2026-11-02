@@ -246,6 +246,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
               <div className="mt-2">
                 <OrderSourceBadge source={o.source} unsynced={o.unsynced} />
               </div>
+              {o.placedBy && <div className="text-muted-foreground text-xs">Placed from the CRM by {o.placedBy}</div>}
               <Button variant="outline" size="sm" className="mt-3" asChild>
                 <Link href={customerHref(o.customer)}>
                   <User /> View customer profile

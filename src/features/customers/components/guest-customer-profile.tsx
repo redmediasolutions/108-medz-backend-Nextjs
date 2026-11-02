@@ -1,8 +1,10 @@
 "use client";
 
-import { CreditCard, MapPin, Package, Phone } from "lucide-react";
+import Link from "next/link";
+import { CreditCard, MapPin, Package, Phone, ShoppingCart } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCustomerOrders } from "@/features/orders/hooks/use-customer-orders";
@@ -60,6 +62,13 @@ export function GuestCustomerProfile({ phone, email, name }: { phone: string; em
               Orders placed by phone/office or the website. Built from WooCommerce orders matching this phone or email.
             </p>
           </div>
+          {phone && (
+            <Button asChild>
+              <Link href={`/orders/new?phone=${encodeURIComponent(phone)}`}>
+                <ShoppingCart /> New order
+              </Link>
+            </Button>
+          )}
         </div>
         <CustomerInsights orders={orders} loading={loading} onSelect={setTab} />
         <dl className="grid gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-3">

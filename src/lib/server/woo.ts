@@ -51,3 +51,29 @@ export async function wooGet<T = unknown>(
     totalPages: Number(res.headers.get("x-wp-totalpages") ?? 0),
   };
 }
+
+/** POST/PUT/DELETE to WooCommerce REST v3 (order creation, notes, status). Same auth as wooGet. */
+export async function wooSend<T = unknown>(method: "POST" | "PUT" | "DELETE", path: string, body: unknown): Promise<T> {
+  if (!wooConfigured()) {
+    throw new WooError("WooCommerce keys are not set (WC_CONSUMER_KEY / WC_CONSUMER_SECRET in .env.local)", 500);
+  }
+  const url = `${BASE}/wp-json/wc/v3/${path.replace(/^\//, "")}`;
+  const auth = Buffer.from(`${process.env.WC_CONSUMER_KEY}:${process.env.WC_CONSUMER_SECRET}`).toString("base64");
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { Authorization: `Basic ${auth}`, Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch {
+    throw new WooError("Could not reach the WooCommerce store", 502);
+  }
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = (json && (json.message as string)) || `WooCommerce error (${res.status})`;
+    throw new WooError(msg, res.status);
+  }
+  return json as T;
+}

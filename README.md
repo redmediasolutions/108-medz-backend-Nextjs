@@ -222,3 +222,22 @@ The same `isAdmin()` check is worth adding to `Orders`, `Users`, `Prescription`,
 ## Phone matching
 
 WooCommerce stores phones however staff typed them (`9845012340`, `98450 12340`, `+91…`, `A / B`). `lib/format.ts → phoneKeys()` extracts every 10-digit number; customer profiles and the Orders search look orders up by the last 4 digits and then keep exact number matches. Known gap: numbers typed as `9845 012 340` or `98450 12 340` (last 4 digits not together) aren't found by WooCommerce search (~1% of orders).
+
+## Office orders (staff place orders for callers)
+
+`/orders/new` (also "New order" on Orders and on every customer profile).
+
+- Staff type the caller's phone → the app account with that number is linked automatically
+  (the order then shows in the customer's app), or it's saved as a "new caller" by phone only.
+- Previous addresses (saved app addresses + earlier orders) are one click.
+- Payment: **Cash on delivery** (+₹60, status `on-hold`, payment pending) or **Paid at office**
+  (cash / UPI with reference, status `processing`, marked paid).
+- `POST /api/orders/create` does what the app does:
+  1. WooCommerce order via REST — same `Cash on Delivery Charges` fee line, `flat_rate`
+     "Standard Shipping" ₹49 below ₹500, 5% tax (Woo computes it), meta `app_uid`, `cod_charge`,
+     `wallet_used` + `order_source=office`, `placed_by`.
+  2. Firestore `Orders/{wooId}` with the app's fields (subtotal, tax, shipping, codCharge,
+     finalPayable, items, billing/shippingAddress, uid, rewardReleased…) + `source: "office"`,
+     `placedBy`. Written as the signed-in admin (rules: `Orders` create = any signed-in user).
+  3. If the Firestore write fails the Woo order is cancelled (stock restored).
+- Prices are always re-read from WooCommerce on the server.
