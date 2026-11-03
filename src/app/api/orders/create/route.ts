@@ -23,10 +23,19 @@ class BadRequest extends Error {
   status = 400;
 }
 
-const PAYMENT: Record<StaffPaymentMode, { method: string; title: string; status: string; paid: boolean }> = {
-  cod: { method: "cod", title: "Cash on Delivery", status: "on-hold", paid: false },
-  cash: { method: "cash", title: "Paid at office (Cash)", status: "processing", paid: true },
-  upi: { method: "upi", title: "Paid at office (UPI)", status: "processing", paid: true },
+const PAYMENT_CONFIG: Record<StaffPaymentMode, { method: string; title: string; status: string; paid: boolean }> = {
+  cod: {
+    method: "cod",
+    title: "Cash on Delivery",
+    status: "processing",
+    paid: false,
+  },
+  razorpay: {
+    method: "razorpay",
+    title: "Razorpay",
+    status: "processing",
+    paid: false,
+  },
 };
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
@@ -65,7 +74,7 @@ function parse(body: unknown): StaffOrderInput {
   if (merged.size > 60) throw new BadRequest("Too many items in one order");
 
   const mode = p.mode as StaffPaymentMode;
-  if (!(mode in PAYMENT)) throw new BadRequest("Choose a payment option");
+  if (!(mode in PAYMENT_CONFIG)) throw new BadRequest("Choose a payment option");
   const reference = str(p.reference, 80);
 
   const clientRef = str(b.clientRef, 64);
@@ -74,7 +83,12 @@ function parse(body: unknown): StaffOrderInput {
   return {
     uid: str(b.uid, 128) || null,
     address,
-    items: [...merged].map(([productId, quantity]) => ({ productId, quantity })),
+    items: [...merged].map(([productId, quantity]) => ({
+      productId,
+      quantity,
+      name: "",
+      price: 0,
+    })) as StaffOrderInput["items"],
     payment: { mode, reference },
     note: str(b.note, 500),
     clientRef,
@@ -105,7 +119,7 @@ async function createOrder(token: string, staffUid: string, input: StaffOrderInp
   });
 
   const mode = input.payment.mode;
-  const pay = PAYMENT[mode];
+  const pay = PAYMENT_CONFIG[mode];
   const totals = computeTotals(lines, mode);
 
   // 2. Who is placing it + (for app users) make sure the customer exists
@@ -222,7 +236,12 @@ async function createOrder(token: string, staffUid: string, input: StaffOrderInp
       ? `WooCommerce total is ₹${wooTotal}, app formula gives ₹${totals.finalPayable}. Check the order in WooCommerce.`
       : undefined;
 
-  return { wooOrderId: wooId, finalPayable: totals.finalPayable, ...(warning && { warning }) };
+  return {
+    success: true,
+    wooOrderId: wooId,
+    finalPayable: totals.finalPayable,
+    ...(warning && { warning }),
+  };
 }
 
 export async function POST(req: Request) {
