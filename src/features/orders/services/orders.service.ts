@@ -1,12 +1,21 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "@/firebase/config";
+
 import { mergeOrder, mergeOrderLists } from "../lib/merge-orders";
 import { phoneKeys } from "../lib/order-utils";
 import type { WooListParams } from "../repository/orders.repository";
 import { ordersRepository as repo } from "../repository/orders.repository";
-import { api } from "@/lib/api";
 
-import type { AppOrder, OrderFilters, StaffOrderInput, StaffOrderResult, UnifiedOrder, WooOrder, WooOrderNote } from "../types";
+import type {
+  AppOrder,
+  OrderFilters,
+  StaffOrderInput,
+  StaffOrderResult,
+  UnifiedOrder,
+  WooOrder,
+  WooOrderNote,
+} from "../types";
 import { ORDERS_PAGE_SIZE } from "../types";
-
 
 const CREATED_VIA: Record<string, string | undefined> = { phone: "admin", website: "checkout" };
 
@@ -52,15 +61,17 @@ export const ordersService = {
   /** WooCommerce-led list (All / Phone / Website), each row enriched with its Firebase twin. */
   async wooPage(f: OrderFilters, page: number, pageSize = ORDERS_PAGE_SIZE): Promise<OrdersPage> {
     const digits = phoneQuery(f.search);
-    const res = digits ? await ordersService.wooPhoneSearch(f, digits, page, pageSize) : await repo.wooList({
-      page,
-      perPage: pageSize,
-      status: f.status,
-      search: f.search.trim(),
-      after: f.from,
-      before: f.to,
-      createdVia: CREATED_VIA[f.source],
-    });
+    const res = digits
+      ? await ordersService.wooPhoneSearch(f, digits, page, pageSize)
+      : await repo.wooList({
+          page,
+          perPage: pageSize,
+          status: f.status,
+          search: f.search.trim(),
+          after: f.from,
+          before: f.to,
+          createdVia: CREATED_VIA[f.source],
+        });
     let app: AppOrder[] = [];
     let appError: string | null = null;
     try {
@@ -73,6 +84,30 @@ export const ordersService = {
     // An app order that Woo shows as created via admin/checkout is still an app order — keep the filter honest
     if (f.source === "phone" || f.source === "website") rows = rows.filter((r) => r.source === f.source);
     return { rows, total: res.total, totalPages: res.totalPages, appError };
+  },
+
+  // Inside ordersService object:
+async createPaymentLink(params: {
+    orderKey: string;
+    amount: number;
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string;
+  }): Promise<{ success: boolean; paymentLinkId: string; paymentLinkUrl: string }> {
+    const functions = getFunctions(app, "us-central1");
+    const callGenLink = httpsCallable<
+      {
+        orderKey: string;
+        amount: number;
+        customerName?: string;
+        customerPhone?: string;
+        customerEmail?: string;
+      },
+      { success: boolean; paymentLinkId: string; paymentLinkUrl: string }
+    >(functions, "generatePaymentLink");
+
+    const res = await callGenLink(params);
+    return res.data;
   },
 
   /** Orders-page search by phone, format-proof. Results are paginated in the browser. */
@@ -148,6 +183,21 @@ export const ordersService = {
   subscribeAppByUid: repo.subscribeAppByUid,
   merge: mergeOrderLists,
 
-  /** Office staff order → WooCommerce + Firestore Orders/{wooId}, exactly like an app order. */
-  createStaffOrder: (input: StaffOrderInput) => api.post<StaffOrderResult>("/api/orders/create", input),
+  /** Office staff order → routes directly to backendOrders Firebase Cloud Function. */
+  async createStaffOrder(input: StaffOrderInput): Promise<StaffOrderResult> {
+    const functions = getFunctions();
+    const callBackendOrders = httpsCallable<unknown, StaffOrderResult>(functions, "backendOrders");
+
+    const response = await callBackendOrders({
+      uid: input.uid,
+      address: input.address,
+      items: input.items,
+      paymentMethod: input.payment.mode === "cod" ? "cod" : "online",
+      reference: input.payment.reference || "",
+      note: input.note || "",
+      clientRef: input.clientRef || "",
+    });
+
+    return response.data;
+  },
 };

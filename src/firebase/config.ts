@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 /**
  * Same Firebase project as the Flutter app (medz-9eda1).
@@ -19,3 +20,5 @@ const firebaseConfig: FirebaseOptions = {
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 export const db = getFirestore(firebaseApp);
+export const app = firebaseApp; // <--- Export alias for app
+export const functions = getFunctions(firebaseApp, "us-central1");

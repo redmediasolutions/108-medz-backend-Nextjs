@@ -1,24 +1,31 @@
 /**
- * Pricing rules of the 108 Medz app, read from real Firestore `Orders` + their WooCommerce twins:
+ * Pricing rules of the 108 Medz app, mirrored from Cloud Functions (backendOrders & createSecureOrder):
  *  - tax        = 5% of the item subtotal (shipping and COD charge are not taxed)
- *  - shipping   = ₹49 when the item subtotal is below ₹500, otherwise free
- *  - COD charge = ₹60 for cash on delivery ("Cash on Delivery Charges" fee line in Woo)
+ *  - shipping   = ₹49 when item subtotal is <= ₹499, otherwise free (> ₹499)
+ *  - COD charge = ₹60 for Cash on Delivery ("Cash on Delivery Charges" fee line in Woo)
  *  - payable    = subtotal + tax + shipping + COD charge − wallet used
- * Shared by the New order form (live preview) and /api/orders/create (authoritative).
  */
+
 export const TAX_RATE = 0.05;
 export const SHIPPING_FEE = 49;
-export const FREE_SHIPPING_FROM = 500;
+export const FREE_SHIPPING_FROM = 499; // Free shipping applies above ₹499 (matches Cloud Function threshold)
 export const COD_CHARGE = 60;
 
 export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-export type StaffPaymentMode = "cod" | "cash" | "upi";
+export type StaffPaymentMode = "cod" | "razorpay";
 
 export const PAYMENT_MODES: { value: StaffPaymentMode; label: string; hint: string }[] = [
-  { value: "cod", label: "Cash on delivery", hint: `Customer pays on delivery · +₹${COD_CHARGE} COD charge` },
-  { value: "cash", label: "Paid at office · Cash", hint: "Already collected in cash" },
-  { value: "upi", label: "Paid at office · UPI", hint: "Already paid by UPI — note the reference" },
+  {
+    value: "cod",
+    label: "Cash on Delivery",
+    hint: `Customer pays on delivery · +₹${COD_CHARGE} COD charge`,
+  },
+  {
+    value: "razorpay",
+    label: "Pay via Razorpay",
+    hint: "Payment link, UPI, card, or net banking",
+  },
 ];
 
 export type OrderTotals = {
@@ -30,12 +37,16 @@ export type OrderTotals = {
   finalPayable: number;
 };
 
-export function computeTotals(lines: { price: number; quantity: number }[], mode: StaffPaymentMode): OrderTotals {
+export function computeTotals(
+  lines: { price: number; quantity: number }[],
+  mode: StaffPaymentMode
+): OrderTotals {
   const subtotal = round2(lines.reduce((s, l) => s + l.price * l.quantity, 0));
   const tax = round2(subtotal * TAX_RATE);
-  const shipping = subtotal > 0 && subtotal < FREE_SHIPPING_FROM ? SHIPPING_FEE : 0;
+  const shipping = subtotal > 0 && subtotal <= FREE_SHIPPING_FROM ? SHIPPING_FEE : 0;
   const codCharge = mode === "cod" && subtotal > 0 ? COD_CHARGE : 0;
   const walletUsed = 0;
+
   return {
     subtotal,
     tax,
@@ -46,7 +57,7 @@ export function computeTotals(lines: { price: number; quantity: number }[], mode
   };
 }
 
-/** Active selling price of a search result (sale price when set, else price). */
+/** Active selling price of a search result (sale price when set, else regular price). */
 export function productPrice(p: { price: string; salePrice: string; regularPrice?: string }): number {
   for (const v of [p.salePrice, p.price, p.regularPrice]) {
     const n = Number(v);

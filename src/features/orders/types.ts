@@ -179,21 +179,32 @@ export type StaffOrderAddress = {
   postcode: string;
 };
 
+export interface StaffOrderItem {
+  productId: number;
+  name: string;
+  price: number;
+  quantity: number;
+  image?: string | null;
+  salt?: string;
+}
+
 /** Body of POST /api/orders/create. Prices are re-read from WooCommerce on the server. */
-export type StaffOrderInput = {
-  /** Firebase auth uid of an app user (orders show in their app), or null for a new caller */
+export interface StaffOrderInput {
   uid: string | null;
   address: StaffOrderAddress;
-  items: { productId: number; quantity: number }[];
-  payment: { mode: "cod" | "cash" | "upi"; reference: string };
-  note: string;
-  /** random id per form submit — a double click / retry returns the first result */
-  clientRef: string;
-};
+  items: StaffOrderItem[];
+  payment: {
+    mode: "cod" | "razorpay";
+    reference?: string;
+  };
+  note?: string;
+  clientRef?: string;
+}
 
-export type StaffOrderResult = {
+export interface StaffOrderResult {
+  success: boolean;
   wooOrderId: number;
+  razorpayOrderId?: string | null;
   finalPayable: number;
-  /** set when WooCommerce's own total differs from the app formula */
   warning?: string;
-};
+}

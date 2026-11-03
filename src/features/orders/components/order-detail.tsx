@@ -1,20 +1,39 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, Copy, ExternalLink, FileQuestion, FileText, MessageSquare, User } from "lucide-react";
+import { doc, onSnapshot } from "firebase/firestore";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  FileQuestion,
+  FileText,
+  Link2,
+  Loader2,
+  MessageSquare,
+  Send,
+  User,
+  XCircle,
+} from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { db } from "@/firebase/config";
 import { ProductThumb } from "@/features/products/components/product-thumb";
 import { formatINRStrict } from "@/lib/format";
 import { formatDateTime, timeAgo } from "@/lib/time-ago";
 
 import { useOrder } from "../hooks/use-orders";
 import { addressLines, paymentMethodLabel } from "../lib/order-utils";
+import { ordersService } from "../services/orders.service";
 import type { OrderAddress } from "../types";
 import { customerHref } from "./customer-link";
 import { OrderSourceBadge, OrderStatusBadge, PaymentBadge } from "./order-badges";
@@ -83,6 +102,114 @@ function AddressCard({ title, a }: { title: string; a: OrderAddress }) {
 export function OrderDetail({ orderKey }: { orderKey: string }) {
   const { order: o, notes, loading, error, wooError } = useOrder(orderKey);
 
+  const [generatingLink, setGeneratingLink] = React.useState(false);
+  const [createdPaymentLink, setCreatedPaymentLink] = React.useState<string | null>(null);
+
+  // Live Firestore document state for instant webhook sync
+  const [liveDoc, setLiveDoc] = React.useState<{
+    paymentStatus?: string;
+    paymentLinkId?: string;
+    paymentLinkUrl?: string;
+    paymentLinkStatus?: string;
+    razorpayPaymentId?: string;
+    paidAt?: Date | null;
+    status?: string;
+    finalized?: boolean;
+  } | null>(null);
+
+  const orderId = o?.wooId ? String(o.wooId) : o?.number ?? orderKey;
+
+  React.useEffect(() => {
+    if (!orderId) return;
+
+    const docRef = doc(db, "Orders", String(orderId));
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setLiveDoc({
+            paymentStatus: data.paymentStatus,
+            paymentLinkId: data.paymentLinkId,
+            paymentLinkUrl: data.paymentLinkUrl,
+            paymentLinkStatus: data.paymentLinkStatus,
+            razorpayPaymentId: data.razorpayPaymentId,
+            paidAt: data.paidAt?.toDate ? data.paidAt.toDate() : data.paidAt ? new Date(data.paidAt) : null,
+            status: data.status,
+            finalized: data.finalized,
+          });
+        }
+      },
+      (err) => {
+        console.error("Firestore onSnapshot subscription error:", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [orderId]);
+
+  // Derived state merging initial WooCommerce/API order with real-time Firestore webhook state
+  const isPaid =
+    liveDoc?.paymentStatus === "captured" ||
+    liveDoc?.paymentLinkStatus === "paid" ||
+    liveDoc?.status === "processing" ||
+    o?.payment.state === "paid";
+
+  const paymentLinkUrl =
+    liveDoc?.paymentLinkUrl ||
+    (o as any)?.paymentLinkUrl ||
+    createdPaymentLink;
+
+  const paymentLinkStatus =
+    liveDoc?.paymentLinkStatus ||
+    (o as any)?.paymentLinkStatus;
+
+  const transactionId =
+    liveDoc?.razorpayPaymentId ||
+    o?.payment.razorpayPaymentId ||
+    o?.payment.transactionId ||
+    "";
+
+  const paidTimestamp =
+    liveDoc?.paidAt ||
+    o?.payment.paidAt;
+
+  async function handleGeneratePaymentLink() {
+    if (!o) return;
+    try {
+      setGeneratingLink(true);
+      const res = await ordersService.createPaymentLink({
+        orderKey: String(o.wooId ?? o.number ?? orderKey),
+        amount: o.total,
+        customerName: o.customer.name,
+        customerPhone: o.customer.phone,
+        customerEmail: o.customer.email,
+      });
+
+      setCreatedPaymentLink(res.paymentLinkUrl);
+      toast.success("Payment link generated!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to generate payment link");
+    } finally {
+      setGeneratingLink(false);
+    }
+  }
+
+  function handleShareWhatsApp(url: string) {
+    if (!o?.customer.phone) {
+      toast.error("Customer phone number not available for WhatsApp sharing");
+      return;
+    }
+    const cleanPhone = o.customer.phone.replace(/\D/g, "").slice(-10);
+    const text = encodeURIComponent(
+      `Hello ${o.customer.name || ""},\n\nPlease complete your payment of ${formatINRStrict(
+        o.total
+      )} for 108 Medz Order #${o.number} using this link:\n${url}\n\nThank you!`
+    );
+    window.open(`https://wa.me/91${cleanPhone}?text=${text}`, "_blank");
+  }
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -118,8 +245,15 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       <BackLink />
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <h1 className="font-mono text-2xl font-semibold tracking-tight">#{o.number}</h1>
-        <OrderStatusBadge status={o.status} />
-        <PaymentBadge order={o} />
+        <OrderStatusBadge status={isPaid && o.status === "pending" ? "processing" : o.status} />
+        {isPaid ? (
+          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 gap-1.5 font-medium">
+            <CheckCircle2 className="size-3.5" />
+            Paid
+          </Badge>
+        ) : (
+          <PaymentBadge order={o} />
+        )}
         <span className="text-muted-foreground text-sm">
           {formatDateTime(o.createdAt)} · {o.createdAt ? timeAgo(o.createdAt) : ""}
         </span>
@@ -180,7 +314,13 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
             </ul>
             <div className="grid gap-1.5 border-t px-6 py-4 text-sm sm:ml-auto sm:w-80">
               <Row label="Subtotal" value={formatINRStrict(o.subtotal)} />
-              {o.discount > 0 && <Row label={`Discount${o.coupons.length ? ` (${o.coupons.join(", ")})` : ""}`} value={`−${formatINRStrict(o.discount)}`} tone="text-success" />}
+              {o.discount > 0 && (
+                <Row
+                  label={`Discount${o.coupons.length ? ` (${o.coupons.join(", ")})` : ""}`}
+                  value={`−${formatINRStrict(o.discount)}`}
+                  tone="text-success"
+                />
+              )}
               {o.shipping > 0 && <Row label="Shipping" value={formatINRStrict(o.shipping)} />}
               {o.tax > 0 && <Row label="Tax" value={formatINRStrict(o.tax)} />}
               {o.codCharge > 0 && <Row label="COD charge" value={formatINRStrict(o.codCharge)} />}
@@ -191,10 +331,12 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
                 ))}
               {o.walletUsed > 0 && <Row label="Wallet used" value={`−${formatINRStrict(o.walletUsed)}`} tone="text-success" />}
               <div className="my-1 border-t" />
-              <Row label={o.payment.state === "paid" ? "Paid" : "Payable"} value={formatINRStrict(o.total)} strong />
+              <Row label={isPaid ? "Paid" : "Payable"} value={formatINRStrict(o.total)} strong />
               {o.refunded > 0 && <Row label="Refunded" value={`−${formatINRStrict(o.refunded)}`} tone="text-destructive" />}
               {totalsDiffer && (
-                <p className="text-muted-foreground pt-1 text-xs">WooCommerce total is {formatINRStrict(o.wooTotal!)} (before app wallet adjustments).</p>
+                <p className="text-muted-foreground pt-1 text-xs">
+                  WooCommerce total is {formatINRStrict(o.wooTotal!)} (before app wallet adjustments).
+                </p>
               )}
             </div>
           </Card>
@@ -255,28 +397,36 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
             </CardContent>
           </Card>
 
+          {/* ------------ Payment Card ------------ */}
           <Card className="gap-4">
             <CardHeader>
               <CardTitle>Payment</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-2 text-sm">
+            <CardContent className="grid gap-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Method</span>
                 <span>{paymentMethodLabel(o)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Status</span>
-                <PaymentBadge order={o} />
+                {isPaid ? (
+                  <Badge variant="outline" className="border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 gap-1.5 font-medium">
+                    <CheckCircle2 className="size-3.5" />
+                    Paid
+                  </Badge>
+                ) : (
+                  <PaymentBadge order={o} />
+                )}
               </div>
-              {o.payment.paidAt && (
+              {paidTimestamp && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Paid on</span>
-                  <span>{formatDateTime(o.payment.paidAt)}</span>
+                  <span>{formatDateTime(paidTimestamp)}</span>
                 </div>
               )}
-              <CopyValue label="Transaction ID" value={o.payment.transactionId} />
-              <CopyValue label="Razorpay order" value={o.payment.razorpayOrderId} />
-              <CopyValue label="Razorpay payment" value={o.payment.razorpayPaymentId} />
+              <CopyValue label="Transaction ID" value={transactionId} />
+              <CopyValue label="Razorpay order" value={o.payment.razorpayOrderId ?? ""} />
+              <CopyValue label="Payment Link ID" value={liveDoc?.paymentLinkId || (o as any)?.paymentLinkId || ""} />
               {o.walletUsed > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Wallet used</span>
@@ -290,6 +440,78 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
                     {formatINRStrict(o.rewardAmount)}{" "}
                     <span className="text-muted-foreground text-xs">{o.rewardReleased ? "released" : "pending"}</span>
                   </span>
+                </div>
+              )}
+
+              {/* Razorpay Payment Link Generator / Share Box */}
+              {!isPaid && (
+                <div className="border-t pt-3">
+                  {paymentLinkUrl ? (
+                    <div className="bg-primary/5 border-primary/20 grid gap-2.5 rounded-lg border p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 font-medium text-xs">
+                          <Link2 className="text-primary size-3.5" /> Razorpay Payment Link
+                        </span>
+                        {paymentLinkStatus && (
+                          <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                            {paymentLinkStatus}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={paymentLinkUrl}
+                          className="bg-background min-w-0 flex-1 rounded border px-2 py-1 font-mono text-xs tabular-nums select-all"
+                        />
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="size-7 shrink-0"
+                          title="Copy Link"
+                          onClick={() => {
+                            navigator.clipboard.writeText(paymentLinkUrl);
+                            toast.success("Payment link copied");
+                          }}
+                        >
+                          <Copy className="size-3.5" />
+                        </Button>
+                        <Button size="icon" variant="outline" className="size-7 shrink-0" title="Open Link" asChild>
+                          <a href={paymentLinkUrl} target="_blank" rel="noreferrer">
+                            <ExternalLink className="size-3.5" />
+                          </a>
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 flex-1 text-xs"
+                          onClick={() => handleShareWhatsApp(paymentLinkUrl)}
+                        >
+                          <Send className="mr-1 size-3" /> Share via WhatsApp
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="w-full text-xs"
+                      disabled={generatingLink}
+                      onClick={handleGeneratePaymentLink}
+                    >
+                      {generatingLink ? (
+                        <>
+                          <Loader2 className="mr-1.5 size-3.5 animate-spin" /> Generating Razorpay Link...
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="mr-1.5 size-3.5" /> Generate Razorpay Payment Link
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>

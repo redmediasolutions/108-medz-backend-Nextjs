@@ -7,8 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  Banknote,
   Check,
+  CreditCard,
   History,
   Loader2,
   MapPin,
@@ -20,7 +20,6 @@ import {
   Trash2,
   Truck,
   UserPlus,
-  Wallet,
 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -49,7 +48,6 @@ import { useCustomerOrders } from "../hooks/use-customer-orders";
 import {
   computeTotals,
   FREE_SHIPPING_FROM,
-  PAYMENT_MODES,
   productPrice,
   type StaffPaymentMode,
 } from "../lib/order-pricing";
@@ -60,13 +58,23 @@ type Line = { productId: number; name: string; image: string | null; salt: strin
 const EMPTY_ADDRESS: StaffOrderAddress = { name: "", phone: "", address1: "", address2: "", city: "", state: "Kerala", postcode: "" };
 const STATES = ["Kerala", "Karnataka", "Tamil Nadu", "Andhra Pradesh", "Telangana", "Maharashtra", "Goa", "Puducherry"];
 
+// Configured exclusively for Cash on Delivery & Pay via Razorpay
+const ACTIVE_PAYMENT_MODES: { value: StaffPaymentMode; label: string; hint: string }[] = [
+  {
+    value: "cod",
+    label: "Cash on Delivery",
+    hint: "Collect payment upon doorstep delivery",
+  },
+  {
+    value: "razorpay" as StaffPaymentMode,
+    label: "Pay via Razorpay",
+    hint: "Payment link, UPI, card, or net banking",
+  },
+];
+
 const newRef = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
-/**
- * Office staff place an order for someone on the phone. It is written exactly like an app order
- * (WooCommerce + Firestore Orders/{id}); linking an app account makes it show in their app too.
- */
 export function NewOrderForm() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -87,7 +95,7 @@ export function NewOrderForm() {
   const phone = phoneKey(phoneInput);
   const phoneValid = phone.length === 10;
 
-  // ---- Customer: preset from ?customer=<Users doc id> (from the customer page) ----
+  // ---- Customer: preset from ?customer=<Users doc id> ----
   const preset = useCustomer(presetCustomerId || "__none__");
   React.useEffect(() => {
     const c = preset.data;
@@ -106,7 +114,6 @@ export function NewOrderForm() {
   });
   const appAccounts = React.useMemo(() => matches.data ?? [], [matches.data]);
 
-  // auto-link the single matching app account unless staff chose "new caller"
   React.useEffect(() => {
     if (!phoneValid) {
       if (!presetCustomerId) setLinked(null);
@@ -125,7 +132,7 @@ export function NewOrderForm() {
     if (linked) setAddress((a) => ({ ...a, name: a.name || linked.name }));
   }, [linked]);
 
-  // ---- Previous addresses: saved app addresses + addresses on earlier orders ----
+  // ---- Previous addresses ----
   const saved = useCustomerAddresses(linked);
   const history = useCustomerOrders(phoneValid ? { uid: linked?.authUid ?? null, phone, email: linked?.email ?? "" } : null);
   const suggestions = React.useMemo(() => {
@@ -195,14 +202,31 @@ export function NewOrderForm() {
       const res = await create.mutateAsync({
         uid: linked && !asNewCaller ? linked.authUid : null,
         address: { ...address, phone },
-        items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
-        payment: { mode, reference: mode === "cod" ? "" : reference },
+        items: lines.map((l) => ({
+          productId: l.productId,
+          name: l.name,
+          price: l.price,
+          quantity: l.quantity,
+          image: l.image,
+          salt: l.salt,
+        })),
+        payment: {
+          mode,
+          reference: mode === "cod" ? "" : reference,
+        },
         note,
         clientRef: clientRef.current,
       });
+
       clientRef.current = newRef();
       toast.success(`Order #${res.wooOrderId} placed · ${formatINRStrict(res.finalPayable)}`);
-      if (res.warning) toast.warning(res.warning, { duration: 10_000 });
+      if (res.razorpayOrderId) {
+        toast.info(`Razorpay Order ID: ${res.razorpayOrderId}`);
+      }
+      if (res.warning) {
+        toast.warning(res.warning, { duration: 10_000 });
+      }
+
       router.push(`/orders/${res.wooOrderId}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not place the order");
@@ -394,11 +418,12 @@ export function NewOrderForm() {
           <Card className="gap-4">
             <CardHeader>
               <CardTitle>4 · Payment</CardTitle>
+              <CardDescription>Select payment method for this order.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
-              <div className="grid gap-2 sm:grid-cols-3" role="radiogroup">
-                {PAYMENT_MODES.map((m) => {
-                  const Icon = m.value === "cod" ? Truck : m.value === "cash" ? Banknote : Wallet;
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
+                {ACTIVE_PAYMENT_MODES.map((m) => {
+                  const Icon = m.value === "cod" ? Truck : CreditCard;
                   const active = mode === m.value;
                   return (
                     <button
@@ -421,13 +446,30 @@ export function NewOrderForm() {
                   );
                 })}
               </div>
-              {mode !== "cod" && (
-                <Field label={mode === "upi" ? "UPI reference / UTR (optional)" : "Receipt no. (optional)"} id="ref" className="sm:max-w-xs">
-                  <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} />
+
+              {mode === ("razorpay" as StaffPaymentMode) && (
+                <Field
+                  label="Razorpay Payment ID / Payment Link ID (optional)"
+                  id="ref"
+                  className="sm:max-w-md"
+                >
+                  <Input
+                    id="ref"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    placeholder="e.g. pay_O123456789 or plink_xxx"
+                  />
                 </Field>
               )}
+
               <Field label="Note for the order (optional)" id="note">
-                <Textarea id="note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. deliver after 5 pm" />
+                <Textarea
+                  id="note"
+                  rows={2}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="e.g. deliver after 5 pm"
+                />
               </Field>
             </CardContent>
           </Card>
@@ -456,7 +498,7 @@ export function NewOrderForm() {
             {totals.codCharge > 0 && <Row label="COD charge" value={totals.codCharge} />}
             <Separator className="my-1" />
             <div className="flex items-baseline justify-between">
-              <span className="font-medium">{mode === "cod" ? "To collect on delivery" : "Total paid"}</span>
+              <span className="font-medium">{mode === "cod" ? "To collect on delivery" : "Total prepaid (Razorpay)"}</span>
               <span className="text-lg font-semibold tabular-nums">{formatINRStrict(totals.finalPayable)}</span>
             </div>
             {toFreeShipping > 0 && (
@@ -491,7 +533,7 @@ export function NewOrderForm() {
               {address.name} · +91 {phone} · {address.postcode}
             </span>
             <span>
-              {lines.length} medicine{lines.length === 1 ? "" : "s"} · {PAYMENT_MODES.find((m) => m.value === mode)?.label}
+              {lines.length} medicine{lines.length === 1 ? "" : "s"} · {ACTIVE_PAYMENT_MODES.find((m) => m.value === mode)?.label}
             </span>
             <span>
               This creates a real order in WooCommerce and Firebase
