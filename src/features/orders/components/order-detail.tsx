@@ -12,6 +12,7 @@ import {
   Copy,
   ExternalLink,
   FileQuestion,
+  FileText,
   Link2,
   Loader2,
   Lock,
@@ -473,6 +474,20 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         )}
 
         <div className="flex-1" />
+        {(order.items?.length ?? 0) > 0 && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/orders/new?repeat=${encodeURIComponent(String(order.id || orderKey))}`}>
+              <RotateCcw className="mr-1 size-3.5" /> Repeat order
+            </Link>
+          </Button>
+        )}
+        {!order.isLegacyWoo && (
+          <Button size="sm" asChild>
+            <Link href={`/orders/${encodeURIComponent(String(order.id || orderKey))}/invoice`}>
+              <FileText className="mr-1 size-3.5" /> Invoice
+            </Link>
+          </Button>
+        )}
         {order.wooId && (
           <Button variant="outline" size="sm" asChild>
             <a href={`${STORE}/wp-admin/post.php?post=${order.wooId}&action=edit`} target="_blank" rel="noreferrer">

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CreditCard, MapPin, Package, Phone, ShoppingCart } from "lucide-react";
+import { CreditCard, MapPin, Package, Phone, RotateCcw, ShoppingCart } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,11 +63,20 @@ export function GuestCustomerProfile({ phone, email, name }: { phone: string; em
             </p>
           </div>
           {phone && (
-            <Button asChild>
-              <Link href={`/orders/new?phone=${encodeURIComponent(phone)}`}>
-                <ShoppingCart /> New order
-              </Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {orders.length > 0 && (
+                <Button variant="outline" asChild>
+                  <Link href={`/orders/new?phone=${encodeURIComponent(phone)}&repeat=latest`}>
+                    <RotateCcw /> Repeat last order
+                  </Link>
+                </Button>
+              )}
+              <Button asChild>
+                <Link href={`/orders/new?phone=${encodeURIComponent(phone)}`}>
+                  <ShoppingCart /> New order
+                </Link>
+              </Button>
+            </div>
           )}
         </div>
         <CustomerInsights orders={orders} loading={loading} onSelect={setTab} />

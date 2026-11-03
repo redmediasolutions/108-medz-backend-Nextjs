@@ -62,7 +62,7 @@ export function AddMedicineSheet({ open, onOpenChange, prescription }: Props) {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search medicine name or salt"
+              placeholder="Search medicine name, salt or product ID"
               className="pl-9"
             />
             {(loading || fetching) && (

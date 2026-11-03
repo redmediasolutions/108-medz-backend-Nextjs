@@ -62,7 +62,7 @@ export function ProductsDashboard() {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. Dolo 650 or Paracetamol"
+          placeholder="e.g. Dolo 650, Paracetamol or product ID 8761"
           className="h-11 pr-10 pl-10 text-base"
         />
         <span className="absolute top-1/2 right-3 -translate-y-1/2">

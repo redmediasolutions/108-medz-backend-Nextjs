@@ -11,6 +11,7 @@ import {
   CreditCard,
   MapPin,
   Package,
+  RotateCcw,
   ShoppingCart,
   UserX,
   Wallet,
@@ -146,11 +147,20 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
               {c.authUid} <Copy className="size-3" />
             </button>
           </div>
-          <Button asChild>
-            <Link href={`/orders/new?customer=${encodeURIComponent(c.id)}`}>
-              <ShoppingCart /> New order
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {orders.orders.length > 0 && (
+              <Button variant="outline" asChild>
+                <Link href={`/orders/new?customer=${encodeURIComponent(c.id)}&repeat=latest`}>
+                  <RotateCcw /> Repeat last order
+                </Link>
+              </Button>
+            )}
+            <Button asChild>
+              <Link href={`/orders/new?customer=${encodeURIComponent(c.id)}`}>
+                <ShoppingCart /> New order
+              </Link>
+            </Button>
+          </div>
         </div>
         <CustomerInsights
           orders={orders.orders}

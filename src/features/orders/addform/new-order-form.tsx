@@ -43,6 +43,7 @@ import { formatINRStrict, phoneKey } from "@/lib/format";
 import { qk } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
+import { RepeatOrderCard } from "../components/repeat-order-card";
 import { useCreateStaffOrder } from "../hooks/use-create-order";
 import { useCustomerOrders } from "../hooks/use-customer-orders";
 import {
@@ -51,7 +52,8 @@ import {
   productPrice,
   type StaffPaymentMode,
 } from "../lib/order-pricing";
-import type { StaffOrderAddress } from "../types";
+import { repeatableOrders, repeatOrderService } from "../services/repeat-order.service";
+import type { StaffOrderAddress, UnifiedOrder } from "../types";
 
 type Line = { productId: number; name: string; image: string | null; salt: string; price: number; quantity: number };
 
@@ -79,6 +81,8 @@ export function NewOrderForm() {
   const router = useRouter();
   const sp = useSearchParams();
   const presetCustomerId = sp.get("customer") ?? "";
+  /** ?repeat=<order id> (from an order page) or ?repeat=latest (from a customer profile) */
+  const presetRepeat = sp.get("repeat") ?? "";
 
   const [phoneInput, setPhoneInput] = React.useState(() => phoneKey(sp.get("phone")) || "");
   const [linked, setLinked] = React.useState<Customer | null>(null);
@@ -89,6 +93,8 @@ export function NewOrderForm() {
   const [reference, setReference] = React.useState("");
   const [note, setNote] = React.useState("");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [repeatBusy, setRepeatBusy] = React.useState<string | null>(null);
+  const repeatDone = React.useRef(false);
   const clientRef = React.useRef(newRef());
 
   const create = useCreateStaffOrder();
@@ -170,6 +176,75 @@ export function NewOrderForm() {
     }
     return out;
   }, [saved.data, history.orders, phone]);
+
+  // ---- Repeat order (Swiggy / Zomato style) ----
+  const repeatable = React.useMemo(() => repeatableOrders(history.orders).slice(0, 6), [history.orders]);
+
+  async function applyRepeat(o: UnifiedOrder) {
+    setRepeatBusy(o.key);
+    try {
+      const r = await repeatOrderService.build(o);
+      if (r.lines.length === 0) {
+        toast.error(`None of the medicines in order #${o.number} are available in the store now.`);
+        return;
+      }
+      const before = { lines, address };
+      setLines(r.lines);
+      if (r.address) {
+        const ra = r.address;
+        setAddress((a) => ({ ...ra, name: ra.name || a.name, phone: phoneValid ? phone : ra.phone }));
+      }
+      const count = r.lines.reduce((t, l) => t + l.quantity, 0);
+      toast.success(`Repeated order #${o.number} · ${r.lines.length} medicine${r.lines.length === 1 ? "" : "s"} (${count} qty)`, {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setLines(before.lines);
+            setAddress(before.address);
+          },
+        },
+      });
+      if (r.unavailable.length) {
+        toast.warning(`Not available now, left out: ${r.unavailable.join(", ")}`, { duration: 12_000 });
+      }
+      if (r.priceChanges.length) {
+        toast.info(
+          `Price changed since last time: ${r.priceChanges
+            .map((c) => `${c.name} ${formatINRStrict(c.from)} → ${formatINRStrict(c.to)}`)
+            .join("; ")}`,
+          { duration: 12_000 }
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not repeat that order");
+    } finally {
+      setRepeatBusy(null);
+    }
+  }
+
+  // ?repeat=<order id>: load that order (Firestore first), take its phone, fill the cart once
+  React.useEffect(() => {
+    if (!presetRepeat || presetRepeat === "latest" || repeatDone.current) return;
+    repeatDone.current = true;
+    void repeatOrderService.load(presetRepeat).then((o) => {
+      if (!o) {
+        toast.error(`Order #${presetRepeat} not found`);
+        return;
+      }
+      const ph = phoneKey(o.customer.phone) || phoneKey(o.billing.phone) || phoneKey(o.shippingAddress.phone);
+      if (ph && !presetCustomerId) setPhoneInput(ph);
+      void applyRepeat(o);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetRepeat]);
+
+  // ?repeat=latest: once this customer's orders are loaded, repeat the newest one
+  React.useEffect(() => {
+    if (presetRepeat !== "latest" || repeatDone.current || history.loading || !repeatable[0]) return;
+    repeatDone.current = true;
+    void applyRepeat(repeatable[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetRepeat, history.loading, repeatable]);
 
   // ---- Totals ----
   const totals = computeTotals(lines, mode);
@@ -333,6 +408,14 @@ export function NewOrderForm() {
               )}
             </CardContent>
           </Card>
+
+          {/* ------------ Repeat an earlier order ------------ */}
+          {phoneValid &&
+            (history.loading && repeatable.length === 0 ? (
+              <Skeleton className="h-24 w-full rounded-xl" />
+            ) : (
+              <RepeatOrderCard orders={repeatable} busyKey={repeatBusy} onRepeat={applyRepeat} />
+            ))}
 
           {/* ------------ 2. Delivery address ------------ */}
           <Card className="gap-4">
@@ -585,12 +668,12 @@ function MedicinesCard({
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>3 · Medicines</CardTitle>
-        <CardDescription>Search by name or salt. Prices are confirmed from the store when the order is placed.</CardDescription>
+        <CardDescription>Search by name, salt or product ID. Prices are confirmed from the store when the order is placed.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
         <div className="relative">
           <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search medicine name or salt" className="pl-9" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search medicine name, salt or product ID" className="pl-9" />
           {(loading || fetching) && (
             <Loader2 className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin" />
           )}
