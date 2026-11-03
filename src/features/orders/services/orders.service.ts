@@ -1,5 +1,6 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "@/firebase/config";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { app, db } from "@/firebase/config";
 
 import { mergeOrder, mergeOrderLists } from "../lib/merge-orders";
 import { phoneKeys } from "../lib/order-utils";
@@ -86,8 +87,8 @@ export const ordersService = {
     return { rows, total: res.total, totalPages: res.totalPages, appError };
   },
 
-  // Inside ordersService object:
-async createPaymentLink(params: {
+  /** Calls the Cloud Function to generate a Razorpay Payment Link */
+  async createPaymentLink(params: {
     orderKey: string;
     amount: number;
     customerName?: string;
@@ -133,6 +134,62 @@ async createPaymentLink(params: {
       total: hit.orders.length,
       totalPages: Math.max(1, Math.ceil(hit.orders.length / pageSize)),
     };
+  },
+
+  /** Persists modified prices and custom shipping fee to Firestore and WooCommerce */
+  async updateOrderPricing(params: {
+    orderKey: string;
+    wooId?: number | null;
+    items: Array<{ productId: number; name: string; price: number; quantity: number; total: number }>;
+    shipping: number;
+    subtotal: number;
+    tax: number;
+    total: number;
+  }): Promise<void> {
+    const { orderKey, wooId, items, shipping, subtotal, tax, total } = params;
+
+    // 1. Update Firestore Orders collection
+    const orderDocId = String(wooId || orderKey);
+    const orderRef = doc(db, "Orders", orderDocId);
+
+    await updateDoc(orderRef, {
+      items: items.map((it) => ({
+        productId: it.productId,
+        name: it.name,
+        price: it.price,
+        quantity: it.quantity,
+        total: it.total,
+      })),
+      shipping,
+      subtotal,
+      tax,
+      total,
+      pricingOverridden: true,
+      updatedAt: serverTimestamp(),
+    });
+
+    // 2. Sync changes back to WooCommerce via your internal Next.js API route if available
+    if (wooId) {
+      try {
+        const res = await fetch(`/api/orders/${wooId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shipping_total: String(shipping),
+            line_items: items.map((it) => ({
+              id: it.productId,
+              subtotal: String(it.total),
+              total: String(it.total),
+            })),
+          }),
+        });
+        if (!res.ok) {
+          console.warn(`WooCommerce sync returned status ${res.status}`);
+        }
+      } catch (err) {
+        console.warn("WooCommerce sync skipped or failed:", err);
+      }
+    }
   },
 
   /** App orders (Firebase) created on/after `from`, newest first. */
@@ -184,14 +241,15 @@ async createPaymentLink(params: {
   merge: mergeOrderLists,
 
   /** Office staff order → routes directly to backendOrders Firebase Cloud Function. */
-  async createStaffOrder(input: StaffOrderInput): Promise<StaffOrderResult> {
-    const functions = getFunctions();
+  async createStaffOrder(input: StaffOrderInput & { shipping?: number }): Promise<StaffOrderResult> {
+    const functions = getFunctions(app, "us-central1");
     const callBackendOrders = httpsCallable<unknown, StaffOrderResult>(functions, "backendOrders");
 
     const response = await callBackendOrders({
       uid: input.uid,
       address: input.address,
       items: input.items,
+      shipping: input.shipping !== undefined ? input.shipping : undefined,
       paymentMethod: input.payment.mode === "cod" ? "cod" : "online",
       reference: input.payment.reference || "",
       note: input.note || "",
