@@ -17,6 +17,8 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  Minus,
+  Plus,
   RotateCcw,
   Save,
   Send,
@@ -119,13 +121,15 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
 
   const [generatingLink, setGeneratingLink] = React.useState(false);
   const [savingPrices, setSavingPrices] = React.useState(false);
+  const [updatingPaymentStatus, setUpdatingPaymentStatus] = React.useState(false);
 
-  // In-flight price and shipping edits
+  // In-flight price, quantity, and shipping edits
   const [customItemPrices, setCustomItemPrices] = React.useState<Record<string | number, number>>({});
+  const [customItemQuantities, setCustomItemQuantities] = React.useState<Record<string | number, number>>({});
   const [customShipping, setCustomShipping] = React.useState<number | null>(null);
   const [isEditingShipping, setIsEditingShipping] = React.useState(false);
 
-  // 1. Dual-source Loader: Firestore Realtime -> WooCommerce Fallback
+  // Dual-source Loader: Firestore Realtime -> WooCommerce Fallback
   React.useEffect(() => {
     if (!orderKey) return;
     setLoading(true);
@@ -139,7 +143,6 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
           setLoading(false);
           setError(null);
         } else {
-          // If not in Firestore, attempt legacy fetch from WooCommerce
           try {
             const res = await ordersService.get(orderKey);
             if (res.order) {
@@ -166,7 +169,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     return () => unsubscribe();
   }, [orderKey]);
 
-  // Merge active record: Firestore document has highest precedence, WooCommerce fills legacy gaps
+  // Merge active record
   const order = React.useMemo(() => {
     if (firestoreOrder) return firestoreOrder;
     if (!legacyWooOrder) return null;
@@ -204,28 +207,33 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     };
   }, [firestoreOrder, legacyWooOrder, orderKey]);
 
-  // Status & Lock evaluation
   const isPaid =
     order?.paymentStatus === "captured" ||
     order?.paymentLinkStatus === "paid" ||
-    order?.status === "processing" ||
     order?.status === "completed" ||
     order?.finalized === true;
 
   const paymentLinkUrl = order?.paymentLinkUrl || "";
   const paymentLinkStatus = order?.paymentLinkStatus || "";
   const hasLinkGenerated = Boolean(paymentLinkUrl);
-  const isLocked = isPaid || hasLinkGenerated;
+
+  const isCodOrder =
+    String(order?.paymentMethod || "").toLowerCase().includes("cod") ||
+    String(order?.paymentMethod || "").toLowerCase().includes("cash");
+
+  // EDIT LOCK RULE
+  const isLocked = isCodOrder ? hasLinkGenerated : (isPaid || hasLinkGenerated);
 
   React.useEffect(() => {
     if (isLocked) {
       setIsEditingShipping(false);
       setCustomItemPrices({});
+      setCustomItemQuantities({});
       setCustomShipping(null);
     }
   }, [isLocked]);
 
-  // Price calculations with live override support
+  // Price & Quantity calculations
   const items: any[] = order?.items || [];
   const activeItems = React.useMemo(() => {
     return items.map((it: any) => {
@@ -234,7 +242,12 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         !isLocked && customItemPrices[itemKey] !== undefined
           ? customItemPrices[itemKey]
           : Number(it.price || 0);
-      const qty = Number(it.quantity || 1);
+
+      const qty =
+        !isLocked && customItemQuantities[itemKey] !== undefined
+          ? customItemQuantities[itemKey]
+          : Number(it.quantity || 1);
+
       return {
         ...it,
         price: unitPrice,
@@ -242,15 +255,16 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         total: Math.round(unitPrice * qty * 100) / 100,
       };
     });
-  }, [items, customItemPrices, isLocked]);
+  }, [items, customItemPrices, customItemQuantities, isLocked]);
 
   const activeSubtotal = React.useMemo(() => {
     if (!order) return 0;
-    if (isLocked || Object.keys(customItemPrices).length === 0) {
+    const hasItemEdits = Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
+    if (isLocked || !hasItemEdits) {
       return Number(order.subtotal || activeItems.reduce((acc, it) => acc + it.total, 0));
     }
     return activeItems.reduce((acc, it) => acc + it.total, 0);
-  }, [order, activeItems, customItemPrices, isLocked]);
+  }, [order, activeItems, customItemPrices, customItemQuantities, isLocked]);
 
   const activeShipping = React.useMemo(() => {
     if (!order) return 0;
@@ -260,11 +274,12 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
 
   const activeTax = React.useMemo(() => {
     if (!order) return 0;
-    if (isLocked || Object.keys(customItemPrices).length === 0) {
+    const hasItemEdits = Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
+    if (isLocked || !hasItemEdits) {
       return Number(order.tax || 0);
     }
     return Math.round(activeSubtotal * 0.05);
-  }, [order, activeSubtotal, customItemPrices, isLocked]);
+  }, [order, activeSubtotal, customItemPrices, customItemQuantities, isLocked]);
 
   const activeTotal = React.useMemo(() => {
     if (!order) return 0;
@@ -284,8 +299,13 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       const it = items.find((item: any) => (item.productId || item.sku || item.name) == key);
       return it && customItemPrices[key] !== Number(it.price);
     });
-    return shippingChanged || pricesChanged;
-  }, [customItemPrices, customShipping, order, items, isLocked]);
+    const quantitiesChanged = Object.keys(customItemQuantities).some((key) => {
+      const it = items.find((item: any) => (item.productId || item.sku || item.name) == key);
+      return it && customItemQuantities[key] !== Number(it.quantity);
+    });
+
+    return shippingChanged || pricesChanged || quantitiesChanged;
+  }, [customItemPrices, customItemQuantities, customShipping, order, items, isLocked]);
 
   function handlePriceChange(itemKey: string | number, newPrice: number) {
     if (isLocked) return;
@@ -295,14 +315,22 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     }));
   }
 
-  function handleResetChanges() {
-    setCustomItemPrices({});
-    setCustomShipping(null);
-    setIsEditingShipping(false);
-    toast.info("Pricing changes reset");
+  function handleQuantityChange(itemKey: string | number, newQuantity: number) {
+    if (isLocked) return;
+    setCustomItemQuantities((prev) => ({
+      ...prev,
+      [itemKey]: Math.max(1, Math.min(999, Math.floor(newQuantity) || 1)),
+    }));
   }
 
-  // Universal Save: updates Firestore and synchronizes legacy orders
+  function handleResetChanges() {
+    setCustomItemPrices({});
+    setCustomItemQuantities({});
+    setCustomShipping(null);
+    setIsEditingShipping(false);
+    toast.info("Pricing and quantity changes reset");
+  }
+
   async function handleSaveChanges() {
     if (!order || isLocked || !hasPendingChanges) return;
     try {
@@ -324,18 +352,58 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       });
 
       setCustomItemPrices({});
+      setCustomItemQuantities({});
       setCustomShipping(null);
       setIsEditingShipping(false);
-      toast.success("Order pricing updated successfully!");
+      toast.success("Order items and pricing updated successfully!");
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || "Failed to update order pricing");
+      toast.error(err.message || "Failed to update order");
     } finally {
       setSavingPrices(false);
     }
   }
 
-  // Universal Payment Link Generator: works for both new and legacy orders
+  async function handleTogglePaidStatus(targetStatus: "captured" | "pending") {
+    if (!order) return;
+    try {
+      setUpdatingPaymentStatus(true);
+      const orderRef = doc(db, "Orders", String(order.wooId || order.id || orderKey));
+      const willBePaid = targetStatus === "captured";
+
+      const updates: any = {
+        paymentStatus: targetStatus,
+        status: willBePaid ? "processing" : "pending",
+        finalized: willBePaid,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (willBePaid) {
+        updates.paidAt = serverTimestamp();
+      } else {
+        updates.paidAt = null;
+      }
+
+      await updateDoc(orderRef, updates).catch(async () => {
+        const { setDoc } = await import("firebase/firestore");
+        await setDoc(orderRef, {
+          wooOrderId: order.wooId || Number(orderKey) || null,
+          paymentMethod: order.paymentMethod || "cod",
+          total: activeTotal,
+          ...updates,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      toast.success(willBePaid ? "Order marked as Paid" : "Order marked as Payment Pending");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to update payment status");
+    } finally {
+      setUpdatingPaymentStatus(false);
+    }
+  }
+
   async function handleGeneratePaymentLink() {
     if (!order || isPaid) return;
     try {
@@ -349,7 +417,6 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         customerEmail: cust.email || "",
       });
 
-      // Write payment link to Firestore Orders document
       const orderRef = doc(db, "Orders", String(order.wooId || order.id || orderKey));
       await updateDoc(orderRef, {
         paymentLinkId: res.paymentLinkId,
@@ -357,8 +424,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         paymentLinkStatus: "created",
         paymentMethod: "razorpay",
         updatedAt: serverTimestamp(),
-      }).catch(async (e) => {
-        // If document does not exist yet (legacy WooCommerce order), initialize it
+      }).catch(async () => {
         const { setDoc } = await import("firebase/firestore");
         await setDoc(orderRef, {
           wooOrderId: order.wooId || Number(orderKey) || null,
@@ -467,6 +533,12 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
           </Badge>
         )}
 
+        {isCodOrder && (
+          <Badge variant="secondary" className="border-blue-500/30 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 font-medium">
+            Cash on Delivery · Editable
+          </Badge>
+        )}
+
         {createdAtDate && (
           <span className="text-muted-foreground text-sm">
             {formatDateTime(createdAtDate)} · {timeAgo(createdAtDate)}
@@ -502,7 +574,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         <div className="bg-primary/10 border-primary/30 mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <AlertTriangle className="text-primary size-4" />
-            <span>You have unsaved changes to item prices or shipping charges.</span>
+            <span>You have unsaved changes to item quantities, prices, or shipping charges.</span>
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="ghost" onClick={handleResetChanges} disabled={savingPrices}>
@@ -520,7 +592,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       {!isPaid && hasLinkGenerated && (
         <div className="bg-muted/40 border-muted-foreground/20 text-muted-foreground mb-6 flex items-center gap-2 rounded-lg border p-3 text-xs">
           <Lock className="size-3.5 shrink-0" />
-          <span>Pricing is locked because an active Razorpay payment link has already been generated.</span>
+          <span>Pricing and quantities are locked because an active Razorpay payment link has already been generated.</span>
         </div>
       )}
 
@@ -544,7 +616,8 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
             <ul className="divide-y">
               {activeItems.map((it, i) => {
                 const itemKey = it.productId || it.sku || it.name;
-                const isModified = !isLocked && customItemPrices[itemKey] !== undefined && customItemPrices[itemKey] !== it.price;
+                const isPriceModified = !isLocked && customItemPrices[itemKey] !== undefined && customItemPrices[itemKey] !== it.price;
+                const isQtyModified = !isLocked && customItemQuantities[itemKey] !== undefined && customItemQuantities[itemKey] !== it.quantity;
 
                 return (
                   <li key={`${it.productId}-${i}`} className="flex flex-wrap items-center gap-3 px-6 py-3">
@@ -552,29 +625,66 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{it.name}</div>
                       <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
-                        <span>Qty: {it.quantity}</span>
                         {it.productId > 0 && <span className="font-mono">#{it.productId}</span>}
                         {it.sku && <span>SKU {it.sku}</span>}
                         {it.salt && <span>· {it.salt}</span>}
                       </div>
                     </div>
 
+                    {/* EDITABLE CONTROLS: PRICE & QUANTITY */}
                     {!isLocked ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-muted-foreground text-xs">₹</span>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          aria-label={`Price for ${it.name}`}
-                          value={isNaN(it.price) ? "" : it.price}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            handlePriceChange(itemKey, isNaN(val) ? 0 : val);
-                          }}
-                          className={`h-8 w-20 text-right tabular-nums text-xs ${isModified ? "border-primary bg-primary/5" : ""}`}
-                        />
-                        <span className="text-muted-foreground text-xs">each</span>
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Price Input */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-muted-foreground text-xs">₹</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            aria-label={`Price for ${it.name}`}
+                            value={isNaN(it.price) ? "" : it.price}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              handlePriceChange(itemKey, isNaN(val) ? 0 : val);
+                            }}
+                            className={`h-8 w-18 text-right tabular-nums text-xs ${isPriceModified ? "border-primary bg-primary/5" : ""}`}
+                          />
+                        </div>
+
+                        {/* Quantity Controls */}
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="size-7"
+                            aria-label="Decrease quantity"
+                            disabled={it.quantity <= 1}
+                            onClick={() => handleQuantityChange(itemKey, it.quantity - 1)}
+                          >
+                            <Minus className="size-3" />
+                          </Button>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            aria-label={`Quantity for ${it.name}`}
+                            value={it.quantity}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                              handleQuantityChange(itemKey, isNaN(val) ? 1 : val);
+                            }}
+                            className={`h-8 w-12 text-center tabular-nums text-xs ${isQtyModified ? "border-primary bg-primary/5" : ""}`}
+                          />
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="size-7"
+                            aria-label="Increase quantity"
+                            disabled={it.quantity >= 999}
+                            onClick={() => handleQuantityChange(itemKey, it.quantity + 1)}
+                          >
+                            <Plus className="size-3" />
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <div className="text-muted-foreground text-xs tabular-nums">
@@ -766,6 +876,41 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
 
               <CopyValue label="Transaction ID" value={order.razorpayPaymentId || order.transactionId || ""} />
               <CopyValue label="Payment Link ID" value={order.paymentLinkId || ""} />
+
+              {/* Status Update Control Box */}
+              <div className="bg-muted/40 grid gap-2 rounded-lg border p-3">
+                <span className="font-medium text-xs">Update Payment Status</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    size="sm"
+                    variant={isPaid ? "default" : "outline"}
+                    className="h-8 text-xs"
+                    disabled={updatingPaymentStatus || isPaid}
+                    onClick={() => handleTogglePaidStatus("captured")}
+                  >
+                    {updatingPaymentStatus && !isPaid ? (
+                      <Loader2 className="mr-1 size-3 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="mr-1 size-3" />
+                    )}
+                    Mark Paid
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={!isPaid ? "secondary" : "outline"}
+                    className="h-8 text-xs"
+                    disabled={updatingPaymentStatus || !isPaid}
+                    onClick={() => handleTogglePaidStatus("pending")}
+                  >
+                    {updatingPaymentStatus && isPaid ? (
+                      <Loader2 className="mr-1 size-3 animate-spin" />
+                    ) : (
+                      <Clock className="mr-1 size-3" />
+                    )}
+                    Mark Pending
+                  </Button>
+                </div>
+              </div>
 
               {/* Payment Link Management (Active only when unpaid) */}
               {!isPaid && (
