@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  CreditCard,
   ExternalLink,
   FileQuestion,
   FileText,
@@ -22,9 +23,11 @@ import {
   RotateCcw,
   Save,
   Send,
+  Truck,
   User,
 } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,6 +125,10 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
   const [generatingLink, setGeneratingLink] = React.useState(false);
   const [savingPrices, setSavingPrices] = React.useState(false);
   const [updatingPaymentStatus, setUpdatingPaymentStatus] = React.useState(false);
+  const [updatingPaymentMethod, setUpdatingPaymentMethod] = React.useState(false);
+
+  // Switch to COD Confirmation Dialog state
+  const [confirmSwitchCodOpen, setConfirmSwitchCodOpen] = React.useState(false);
 
   // In-flight price, quantity, and shipping edits
   const [customItemPrices, setCustomItemPrices] = React.useState<Record<string | number, number>>({});
@@ -196,6 +203,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       tax: legacyWooOrder.tax,
       discount: legacyWooOrder.discount,
       total: legacyWooOrder.total,
+      codCharge: legacyWooOrder.codCharge || 0,
       customer: legacyWooOrder.customer,
       shippingAddress: legacyWooOrder.shippingAddress,
       billing: legacyWooOrder.billing,
@@ -215,13 +223,15 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
 
   const paymentLinkUrl = order?.paymentLinkUrl || "";
   const paymentLinkStatus = order?.paymentLinkStatus || "";
-  const hasLinkGenerated = Boolean(paymentLinkUrl);
+  const hasLinkGenerated = Boolean(paymentLinkUrl && paymentLinkStatus !== "cancelled");
 
   const isCodOrder =
     String(order?.paymentMethod || "").toLowerCase().includes("cod") ||
     String(order?.paymentMethod || "").toLowerCase().includes("cash");
 
-  // EDIT LOCK RULE
+  // EDIT LOCK RULE:
+  // Non-COD orders: locked if paid or an active link exists.
+  // COD orders: editable unless an active Razorpay link exists.
   const isLocked = isCodOrder ? hasLinkGenerated : (isPaid || hasLinkGenerated);
 
   React.useEffect(() => {
@@ -286,11 +296,11 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     if (isLocked) return Number(order.total || 0);
 
     const discount = Number(order.discount || 0);
-    const codCharge = Number(order.codCharge || 0);
+    const codCharge = isCodOrder ? Number(order.codCharge || 0) : 0;
     const walletUsed = Number(order.walletUsed || 0);
     const calculated = activeSubtotal - discount + activeShipping + activeTax + codCharge - walletUsed;
     return Math.max(0, Math.round(calculated));
-  }, [order, activeSubtotal, activeShipping, activeTax, isLocked]);
+  }, [order, activeSubtotal, activeShipping, activeTax, isCodOrder, isLocked]);
 
   const hasPendingChanges = React.useMemo(() => {
     if (isLocked || !order) return false;
@@ -401,6 +411,106 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       toast.error(err.message || "Failed to update payment status");
     } finally {
       setUpdatingPaymentStatus(false);
+    }
+  }
+
+  // Switches payment method to COD and completely erases any existing payment link
+  async function executeSwitchToCod() {
+    if (!order) return;
+    try {
+      setUpdatingPaymentMethod(true);
+      const orderRef = doc(db, "Orders", String(order.wooId || order.id || orderKey));
+
+      const codCharge = Number(order.codCharge || 0);
+      const newTotal = Math.max(
+        0,
+        Math.round(
+          activeSubtotal - Number(order.discount || 0) + activeShipping + activeTax + codCharge - Number(order.walletUsed || 0)
+        )
+      );
+
+      const updates: any = {
+        paymentMethod: "cod",
+        total: newTotal,
+        codCharge: codCharge,
+        // Erase link metadata completely
+        paymentLinkId: "",
+        paymentLinkUrl: "",
+        paymentLinkStatus: "cancelled",
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(orderRef, updates).catch(async () => {
+        const { setDoc } = await import("firebase/firestore");
+        await setDoc(orderRef, {
+          wooOrderId: order.wooId || Number(orderKey) || null,
+          status: order.status || "pending",
+          paymentStatus: order.paymentStatus || "pending",
+          ...updates,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      toast.success("Switched to Cash on Delivery. Payment link erased.");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to switch to COD");
+    } finally {
+      setUpdatingPaymentMethod(false);
+    }
+  }
+
+  // Switches payment method to Razorpay
+  async function executeSwitchToRazorpay() {
+    if (!order) return;
+    try {
+      setUpdatingPaymentMethod(true);
+      const orderRef = doc(db, "Orders", String(order.wooId || order.id || orderKey));
+
+      const newTotal = Math.max(
+        0,
+        Math.round(
+          activeSubtotal - Number(order.discount || 0) + activeShipping + activeTax - Number(order.walletUsed || 0)
+        )
+      );
+
+      const updates: any = {
+        paymentMethod: "razorpay",
+        total: newTotal,
+        codCharge: 0,
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(orderRef, updates).catch(async () => {
+        const { setDoc } = await import("firebase/firestore");
+        await setDoc(orderRef, {
+          wooOrderId: order.wooId || Number(orderKey) || null,
+          status: order.status || "pending",
+          paymentStatus: order.paymentStatus || "pending",
+          ...updates,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      toast.success("Payment method switched to Razorpay.");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to switch to Razorpay");
+    } finally {
+      setUpdatingPaymentMethod(false);
+    }
+  }
+
+  function handleMethodSelect(target: "cod" | "razorpay") {
+    if (target === "cod") {
+      if (hasLinkGenerated) {
+        // Trigger safety confirmation before erasing link
+        setConfirmSwitchCodOpen(true);
+      } else {
+        executeSwitchToCod();
+      }
+    } else {
+      executeSwitchToRazorpay();
     }
   }
 
@@ -592,7 +702,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       {!isPaid && hasLinkGenerated && (
         <div className="bg-muted/40 border-muted-foreground/20 text-muted-foreground mb-6 flex items-center gap-2 rounded-lg border p-3 text-xs">
           <Lock className="size-3.5 shrink-0" />
-          <span>Pricing and quantities are locked because an active Razorpay payment link has already been generated.</span>
+          <span>Pricing and quantities are locked because an active Razorpay payment link has been generated. Switch to COD to unlock and erase link.</span>
         </div>
       )}
 
@@ -779,7 +889,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
               )}
 
               {activeTax > 0 && <Row label="Tax (5%)" value={formatINRStrict(activeTax)} />}
-              {order.codCharge > 0 && <Row label="COD charge" value={formatINRStrict(order.codCharge)} />}
+              {isCodOrder && order.codCharge > 0 && <Row label="COD charge" value={formatINRStrict(order.codCharge)} />}
               {order.walletUsed > 0 && <Row label="Wallet used" value={`−${formatINRStrict(order.walletUsed)}`} tone="text-success" />}
               <div className="my-1 border-t" />
               <Row label={isPaid ? "Paid" : "Payable"} value={formatINRStrict(activeTotal)} strong />
@@ -851,8 +961,38 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
             <CardContent className="grid gap-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Method</span>
-                <span className="font-medium uppercase">{order.paymentMethod || "COD"}</span>
+                <span className="font-medium uppercase">{isCodOrder ? "Cash on Delivery" : (order.paymentMethod || "Online")}</span>
               </div>
+
+              {/* Payment Method Switcher Box */}
+              {!isPaid && (
+                <div className="bg-muted/40 grid gap-2 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-xs">Change Payment Method</span>
+                    {updatingPaymentMethod && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant={isCodOrder ? "default" : "outline"}
+                      className="h-8 text-xs"
+                      disabled={updatingPaymentMethod || isCodOrder}
+                      onClick={() => handleMethodSelect("cod")}
+                    >
+                      <Truck className="mr-1 size-3" /> Cash on Delivery
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={!isCodOrder ? "default" : "outline"}
+                      className="h-8 text-xs"
+                      disabled={updatingPaymentMethod || !isCodOrder || hasLinkGenerated}
+                      onClick={() => handleMethodSelect("razorpay")}
+                    >
+                      <CreditCard className="mr-1 size-3" /> Razorpay
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Payment Status</span>
@@ -915,7 +1055,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
               {/* Payment Link Management (Active only when unpaid) */}
               {!isPaid && (
                 <div className="border-t pt-3">
-                  {paymentLinkUrl ? (
+                  {hasLinkGenerated ? (
                     <div className="bg-primary/5 border-primary/20 grid gap-2.5 rounded-lg border p-3">
                       <div className="flex items-center justify-between">
                         <span className="flex items-center gap-1.5 font-medium text-xs">
@@ -1004,6 +1144,24 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
           </Card>
         </div>
       </div>
+
+      {/* Safety Confirmation Dialog for switching to COD when a link exists */}
+      <ConfirmDialog
+        open={confirmSwitchCodOpen}
+        onOpenChange={setConfirmSwitchCodOpen}
+        title="Switch to Cash on Delivery?"
+        description={
+          <span className="grid gap-1.5 text-sm">
+            <span>An active Razorpay payment link has already been generated for this order.</span>
+            <span className="text-destructive font-medium">
+              Switching to COD will immediately cancel and erase the payment link URL so the customer can no longer pay online through it.
+            </span>
+            <span>Do you want to proceed and unlock this order for COD editing?</span>
+          </span>
+        }
+        confirmLabel="Yes, Switch to COD & Erase Link"
+        onConfirm={executeSwitchToCod}
+      />
     </div>
   );
 }
