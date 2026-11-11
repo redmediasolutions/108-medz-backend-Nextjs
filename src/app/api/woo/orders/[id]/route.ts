@@ -58,7 +58,68 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     await requireAdmin(req);
     const { id } = await params;
     if (!/^\d+$/.test(id)) return NextResponse.json({ message: "Invalid order id" }, { status: 400 });
-    const body = (await req.json().catch(() => ({}))) as { status?: string };
+    const body = (await req.json().catch(() => ({}))) as { status?: string; action?: string };
+
+    // { action: "waive-cod" } — front desk removes the "Cash on Delivery Charges" fee line.
+    // WooCommerce recalculates the order total when fee lines change. Safe to repeat.
+    if (body.action === "waive-cod") {
+      type Fee = { id: number; name: string; total: string };
+      const { data: cur } = await wooGet<{ total: string; fee_lines?: Fee[] }>(`orders/${id}`, { _fields: "id,total,fee_lines" });
+      const cod = (cur.fee_lines ?? []).filter((f) => /cash\s*on\s*delivery|\bcod\b/i.test(f.name));
+      if (cod.length === 0) return NextResponse.json({ total: Number(cur.total), removed: 0 });
+      const updated = await wooSend<{ total: string }>("PUT", `orders/${id}`, {
+        fee_lines: cod.map((f) => ({ id: f.id, name: null })),
+        meta_data: [{ key: "cod_charge", value: "0" }],
+      });
+      await wooSend("POST", `orders/${id}/notes`, { note: "🧾 COD charge waived by front desk (108Medz CRM)" }).catch(() => null);
+      return NextResponse.json({ total: Number(updated.total), removed: cod.length });
+    }
+
+    // { action: "sync-items", items:[{productId, quantity, price}], shipping } — make the Woo order's
+    // products / quantities / prices / delivery charge match the CRM edit (adds, removes, updates).
+    // WooCommerce recalculates tax and total when line items change.
+    if (body.action === "sync-items") {
+      const b = body as unknown as { items?: { productId: number; quantity: number; price: number }[]; shipping?: number };
+      const want = (b.items ?? []).filter((i) => Number(i.productId) > 0 && Number(i.quantity) > 0);
+      if (want.length === 0) return NextResponse.json({ message: "An order needs at least one product" }, { status: 400 });
+      type Line = { id: number; product_id: number; variation_id?: number };
+      type Ship = { id: number; method_id: string; total: string };
+      const { data: cur } = await wooGet<{ line_items?: Line[]; shipping_lines?: Ship[] }>(`orders/${id}`, {
+        _fields: "id,line_items,shipping_lines",
+      });
+      const existing = cur.line_items ?? [];
+      const byProduct = new Map<number, Line>();
+      for (const l of existing) if (!byProduct.has(l.product_id)) byProduct.set(l.product_id, l);
+      const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
+      const wanted = new Set(want.map((i) => Number(i.productId)));
+      const line_items: Record<string, unknown>[] = [
+        // update kept products, add new ones
+        ...want.map((i) => {
+          const qty = Math.floor(Number(i.quantity));
+          const total = money(Number(i.price) * qty);
+          const ex = byProduct.get(Number(i.productId));
+          return ex
+            ? { id: ex.id, quantity: qty, subtotal: total, total }
+            : { product_id: Number(i.productId), quantity: qty, subtotal: total, total };
+        }),
+        // remove products no longer in the order (and duplicate lines of a kept product)
+        ...existing
+          .filter((l) => !wanted.has(l.product_id) || byProduct.get(l.product_id)!.id !== l.id)
+          .map((l) => ({ id: l.id, quantity: 0 })),
+      ];
+      const ship = Math.max(0, Number(b.shipping ?? 0));
+      const lines = cur.shipping_lines ?? [];
+      const shipping_lines =
+        lines.length > 0
+          ? [{ id: lines[0].id, total: money(ship) }, ...lines.slice(1).map((l) => ({ id: l.id, method_id: null }))]
+          : ship > 0
+            ? [{ method_id: "flat_rate", method_title: "Standard Shipping", total: money(ship) }]
+            : [];
+      const updated = await wooSend<{ total: string }>("PUT", `orders/${id}`, { line_items, shipping_lines });
+      await wooSend("POST", `orders/${id}/notes`, { note: "✏️ Items / prices edited from 108Medz CRM" }).catch(() => null);
+      return NextResponse.json({ total: Number(updated.total) });
+    }
+
     if (!body.status || !ALLOWED_STATUS.has(body.status)) {
       return NextResponse.json({ message: "Invalid status" }, { status: 400 });
     }

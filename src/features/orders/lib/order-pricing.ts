@@ -39,12 +39,14 @@ export type OrderTotals = {
 
 export function computeTotals(
   lines: { price: number; quantity: number }[],
-  mode: StaffPaymentMode
+  mode: StaffPaymentMode,
+  opts: { waiveCod?: boolean } = {}
 ): OrderTotals {
   const subtotal = round2(lines.reduce((s, l) => s + l.price * l.quantity, 0));
   const tax = round2(subtotal * TAX_RATE);
   const shipping = subtotal > 0 && subtotal <= FREE_SHIPPING_FROM ? SHIPPING_FEE : 0;
-  const codCharge = mode === "cod" && subtotal > 0 ? COD_CHARGE : 0;
+  // front desk can waive the COD charge (₹0) for a customer
+  const codCharge = mode === "cod" && subtotal > 0 && !opts.waiveCod ? COD_CHARGE : 0;
   const walletUsed = 0;
 
   return {

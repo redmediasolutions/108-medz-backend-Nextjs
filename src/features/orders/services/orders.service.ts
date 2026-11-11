@@ -1,6 +1,7 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { app, db } from "@/firebase/config";
+import { api } from "@/lib/api";
 
 import { mergeOrder, mergeOrderLists } from "../lib/merge-orders";
 import { phoneKeys } from "../lib/order-utils";
@@ -139,17 +140,17 @@ export const ordersService = {
   /** Persists modified prices and custom shipping fee to Firestore and WooCommerce */
   async updateOrderPricing(params: {
     orderKey: string;
-    wooId?: number | null;
-    items: Array<{ productId: number; name: string; price: number; quantity: number; total: number }>;
+    wooId?: number | string | null;
+    items: Array<{ productId: number; name: string; price: number; quantity: number; total: number; image?: string | null }>;
     shipping: number;
     subtotal: number;
     tax: number;
     total: number;
-  }): Promise<void> {
+  }): Promise<{ warning?: string }> {
     const { orderKey, wooId, items, shipping, subtotal, tax, total } = params;
 
     // 1. Update Firestore Orders collection
-    const orderDocId = String(wooId || orderKey);
+    const orderDocId = String(orderKey || wooId);
     const orderRef = doc(db, "Orders", orderDocId);
 
     await updateDoc(orderRef, {
@@ -157,38 +158,38 @@ export const ordersService = {
         productId: it.productId,
         name: it.name,
         price: it.price,
+        // the customer app reads salePrice — keep it in step with price
+        salePrice: it.price,
         quantity: it.quantity,
         total: it.total,
+        image: it.image ?? "",
+        requiresPrescription: false,
       })),
       shipping,
       subtotal,
       tax,
       total,
+      // app orders use finalPayable as "amount to collect"
+      finalPayable: total,
       pricingOverridden: true,
       updatedAt: serverTimestamp(),
     });
 
-    // 2. Sync changes back to WooCommerce via your internal Next.js API route if available
-    if (wooId) {
-      try {
-        const res = await fetch(`/api/orders/${wooId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            shipping_total: String(shipping),
-            line_items: items.map((it) => ({
-              id: it.productId,
-              subtotal: String(it.total),
-              total: String(it.total),
-            })),
-          }),
-        });
-        if (!res.ok) {
-          console.warn(`WooCommerce sync returned status ${res.status}`);
-        }
-      } catch (err) {
-        console.warn("WooCommerce sync skipped or failed:", err);
+    // 2. Same change on the WooCommerce twin (adds / removes / updates lines + delivery charge)
+    const woo = String(wooId || (/^\d+$/.test(orderKey) ? orderKey : ""));
+    if (!woo) return {};
+    try {
+      const res = await api.patch<{ total: number }>(`/api/woo/orders/${woo}`, {
+        action: "sync-items",
+        items: items.map((it) => ({ productId: it.productId, quantity: it.quantity, price: it.price })),
+        shipping,
+      });
+      if (Number.isFinite(res.total) && Math.abs(res.total - total) > 0.05) {
+        return { warning: `Saved. WooCommerce now totals ₹${res.total} (CRM ₹${total}) — check order #${woo} in WooCommerce.` };
       }
+      return {};
+    } catch (err) {
+      return { warning: `Saved in Firebase, but WooCommerce wasn't updated: ${err instanceof Error ? err.message : "error"}` };
     }
   },
 
@@ -254,8 +255,64 @@ export const ordersService = {
       reference: input.payment.reference || "",
       note: input.note || "",
       clientRef: input.clientRef || "",
+      // honoured if backendOrders supports it; waiveCodCharge() below makes sure either way
+      ...(input.payment.mode === "cod" && input.waiveCod ? { codCharge: 0, waiveCod: true } : {}),
     });
 
-    return response.data;
+    const result = response.data;
+    if (input.payment.mode === "cod" && input.waiveCod && result?.wooOrderId) {
+      try {
+        const w = await this.waiveCodCharge(String(result.wooOrderId));
+        return { ...result, finalPayable: w.finalPayable ?? result.finalPayable, warning: w.warning ?? result.warning };
+      } catch (e) {
+        return {
+          ...result,
+          warning: `Order placed, but the COD charge could not be removed automatically (${e instanceof Error ? e.message : "error"}). Use "Waive COD charge" on the order page.`,
+        };
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Front desk waives the COD charge on a COD order: Firestore Orders/{id} (codCharge → 0, payable
+   * reduced, codWaived) and the WooCommerce twin ("Cash on Delivery Charges" fee line removed).
+   * Safe to run twice — nothing changes once the charge is 0.
+   */
+  async waiveCodCharge(orderKey: string): Promise<{ finalPayable: number | null; warning?: string }> {
+    const ref = doc(db, "Orders", orderKey);
+    const snap = await getDoc(ref);
+    let finalPayable: number | null = null;
+    let wooId = /^\d+$/.test(orderKey) ? orderKey : "";
+
+    if (snap.exists()) {
+      const d = snap.data() as Record<string, unknown>;
+      wooId = String(d.wooOrderId || wooId || "");
+      const fee = Number(d.codCharge || 0);
+      const num = (v: unknown) => (v === undefined || v === null || v === "" ? null : Number(v));
+      const less = (v: unknown) => {
+        const x = num(v);
+        return x === null || !Number.isFinite(x) ? undefined : Math.max(0, Math.round((x - fee) * 100) / 100);
+      };
+      if (fee > 0) {
+        const patch: Record<string, unknown> = { codCharge: 0, codWaived: true, updatedAt: serverTimestamp() };
+        for (const k of ["finalPayable", "grossTotal", "total"]) {
+          const v = less(d[k]);
+          if (v !== undefined) patch[k] = v;
+        }
+        await updateDoc(ref, patch);
+        finalPayable = (patch.finalPayable as number | undefined) ?? (patch.total as number | undefined) ?? null;
+      } else {
+        finalPayable = num(d.finalPayable ?? d.total);
+      }
+    }
+
+    if (!wooId) return { finalPayable };
+    const woo = await api.patch<{ total: number | null; removed: number }>(`/api/woo/orders/${wooId}`, { action: "waive-cod" });
+    const warning =
+      finalPayable !== null && woo.total !== null && Math.abs(woo.total - finalPayable) > 0.05
+        ? `WooCommerce total is ₹${woo.total} but Firebase says ₹${finalPayable}. Check order #${wooId} in WooCommerce.`
+        : undefined;
+    return { finalPayable, warning };
   },
 };

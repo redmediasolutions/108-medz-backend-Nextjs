@@ -199,6 +199,8 @@ export interface StaffOrderInput {
   };
   note?: string;
   clientRef?: string;
+  /** COD with the ₹60 COD charge waived by the front desk */
+  waiveCod?: boolean;
 }
 
 export interface StaffOrderResult {

@@ -6,6 +6,6 @@ export const INVOICE_SELLER = {
   name: "Saspinjara Pharmaceuticals Pvt. Ltd",
   lines: ["PWD Camp, 3rd D Cross Road", "Sindhnur Raichur 584128", "Karnataka, India"],
   customerId: "1892498737",
-  mobile: "8618208902",
+  mobile: "6366812108",
   logo: "/invoice-logo.png",
 } as const;

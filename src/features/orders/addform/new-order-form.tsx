@@ -90,6 +90,8 @@ export function NewOrderForm() {
   const [address, setAddress] = React.useState<StaffOrderAddress>(EMPTY_ADDRESS);
   const [lines, setLines] = React.useState<Line[]>([]);
   const [mode, setMode] = React.useState<StaffPaymentMode>("cod");
+  /** front desk can make the COD charge ₹0 */
+  const [waiveCod, setWaiveCod] = React.useState(false);
   const [reference, setReference] = React.useState("");
   const [note, setNote] = React.useState("");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
@@ -247,7 +249,7 @@ export function NewOrderForm() {
   }, [presetRepeat, history.loading, repeatable]);
 
   // ---- Totals ----
-  const totals = computeTotals(lines, mode);
+  const totals = computeTotals(lines, mode, { waiveCod });
   const toFreeShipping = totals.subtotal > 0 && totals.shipping ? FREE_SHIPPING_FROM - totals.subtotal : 0;
 
   const problems: string[] = [];
@@ -291,6 +293,7 @@ export function NewOrderForm() {
         },
         note,
         clientRef: clientRef.current,
+        waiveCod: mode === "cod" && waiveCod,
       });
 
       clientRef.current = newRef();
@@ -530,6 +533,23 @@ export function NewOrderForm() {
                 })}
               </div>
 
+              {mode === "cod" && (
+                <label className="hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-lg border p-3 sm:max-w-md">
+                  <input
+                    type="checkbox"
+                    checked={waiveCod}
+                    onChange={(e) => setWaiveCod(e.target.checked)}
+                    className="accent-primary mt-0.5 size-4"
+                  />
+                  <span className="grid gap-0.5">
+                    <span className="text-sm font-medium">Waive COD charge (₹0)</span>
+                    <span className="text-muted-foreground text-xs">
+                      No ₹60 cash-on-delivery charge for this order — removed in Firebase and WooCommerce.
+                    </span>
+                  </span>
+                </label>
+              )}
+
               {mode === ("razorpay" as StaffPaymentMode) && (
                 <Field
                   label="Razorpay Payment ID / Payment Link ID (optional)"
@@ -579,6 +599,12 @@ export function NewOrderForm() {
             <Row label="Tax (5%)" value={totals.tax} />
             <Row label="Delivery" value={totals.shipping} free={totals.subtotal > 0 && !totals.shipping} />
             {totals.codCharge > 0 && <Row label="COD charge" value={totals.codCharge} />}
+            {mode === "cod" && waiveCod && totals.subtotal > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">COD charge</span>
+                <span className="text-success tabular-nums">Waived</span>
+              </div>
+            )}
             <Separator className="my-1" />
             <div className="flex items-baseline justify-between">
               <span className="font-medium">{mode === "cod" ? "To collect on delivery" : "Total prepaid (Razorpay)"}</span>
@@ -617,6 +643,7 @@ export function NewOrderForm() {
             </span>
             <span>
               {lines.length} medicine{lines.length === 1 ? "" : "s"} · {ACTIVE_PAYMENT_MODES.find((m) => m.value === mode)?.label}
+              {mode === "cod" && waiveCod ? " (COD charge waived)" : ""}
             </span>
             <span>
               This creates a real order in WooCommerce and Firebase

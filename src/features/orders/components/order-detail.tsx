@@ -22,7 +22,9 @@ import {
   Plus,
   RotateCcw,
   Save,
+  Search,
   Send,
+  Trash2,
   Truck,
   User,
 } from "lucide-react";
@@ -36,9 +38,12 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { db } from "@/firebase/config";
 import { ProductThumb } from "@/features/products/components/product-thumb";
+import { useProductSearch } from "@/features/products/hooks/use-product-search";
+import type { Product } from "@/features/products/types";
 import { formatINRStrict } from "@/lib/format";
 import { formatDateTime, timeAgo } from "@/lib/time-ago";
 
+import { productPrice, round2 } from "../lib/order-pricing";
 import { addressLines } from "../lib/order-utils";
 import { ordersService } from "../services/orders.service";
 import type { OrderAddress } from "../types";
@@ -135,6 +140,10 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
   const [customItemQuantities, setCustomItemQuantities] = React.useState<Record<string | number, number>>({});
   const [customShipping, setCustomShipping] = React.useState<number | null>(null);
   const [isEditingShipping, setIsEditingShipping] = React.useState(false);
+  // Products added / removed while editing (saved with "Save Changes")
+  const [addedItems, setAddedItems] = React.useState<any[]>([]);
+  const [removedKeys, setRemovedKeys] = React.useState<Record<string, true>>({});
+  const [waivingCod, setWaivingCod] = React.useState(false);
 
   // Dual-source Loader: Firestore Realtime -> WooCommerce Fallback
   React.useEffect(() => {
@@ -240,13 +249,29 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       setCustomItemPrices({});
       setCustomItemQuantities({});
       setCustomShipping(null);
+      setAddedItems([]);
+      setRemovedKeys({});
     }
   }, [isLocked]);
 
   // Price & Quantity calculations
-  const items: any[] = order?.items || [];
+  // App orders (createSecureOrder) store the unit price as `salePrice`; backend/repriced orders use `price`.
+  const items: any[] = React.useMemo(
+    () =>
+      (order?.items || []).map((it: any) => {
+        const qty = Number(it.quantity || 1);
+        const unit = [it.price, it.salePrice, it.sale_price, it.regularPrice].map(Number).find((n) => Number.isFinite(n) && n > 0);
+        const fromTotal = Number(it.total) > 0 && qty > 0 ? round2(Number(it.total) / qty) : 0;
+        return { ...it, price: unit ?? fromTotal };
+      }),
+    [order?.items]
+  );
+  const itemKeyOf = (it: any) => String(it.productId || it.sku || it.name);
+  const structureChanged = addedItems.length > 0 || Object.keys(removedKeys).length > 0;
+
   const activeItems = React.useMemo(() => {
-    return items.map((it: any) => {
+    const base = isLocked ? items : [...items.filter((it) => !removedKeys[itemKeyOf(it)]), ...addedItems];
+    return base.map((it: any) => {
       const itemKey = it.productId || it.sku || it.name;
       const unitPrice =
         !isLocked && customItemPrices[itemKey] !== undefined
@@ -265,16 +290,19 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         total: Math.round(unitPrice * qty * 100) / 100,
       };
     });
-  }, [items, customItemPrices, customItemQuantities, isLocked]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, addedItems, removedKeys, customItemPrices, customItemQuantities, isLocked]);
 
   const activeSubtotal = React.useMemo(() => {
     if (!order) return 0;
-    const hasItemEdits = Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
+    const hasItemEdits =
+      structureChanged || Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
     if (isLocked || !hasItemEdits) {
       return Number(order.subtotal || activeItems.reduce((acc, it) => acc + it.total, 0));
     }
     return activeItems.reduce((acc, it) => acc + it.total, 0);
-  }, [order, activeItems, customItemPrices, customItemQuantities, isLocked]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, activeItems, customItemPrices, customItemQuantities, structureChanged, isLocked]);
 
   const activeShipping = React.useMemo(() => {
     if (!order) return 0;
@@ -284,12 +312,14 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
 
   const activeTax = React.useMemo(() => {
     if (!order) return 0;
-    const hasItemEdits = Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
+    const hasItemEdits =
+      structureChanged || Object.keys(customItemPrices).length > 0 || Object.keys(customItemQuantities).length > 0;
     if (isLocked || !hasItemEdits) {
       return Number(order.tax || 0);
     }
-    return Math.round(activeSubtotal * 0.05);
-  }, [order, activeSubtotal, customItemPrices, customItemQuantities, isLocked]);
+    return round2(activeSubtotal * 0.05);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, activeSubtotal, customItemPrices, customItemQuantities, structureChanged, isLocked]);
 
   const activeTotal = React.useMemo(() => {
     if (!order) return 0;
@@ -299,7 +329,7 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     const codCharge = isCodOrder ? Number(order.codCharge || 0) : 0;
     const walletUsed = Number(order.walletUsed || 0);
     const calculated = activeSubtotal - discount + activeShipping + activeTax + codCharge - walletUsed;
-    return Math.max(0, Math.round(calculated));
+    return Math.max(0, round2(calculated));
   }, [order, activeSubtotal, activeShipping, activeTax, isCodOrder, isLocked]);
 
   const hasPendingChanges = React.useMemo(() => {
@@ -314,8 +344,52 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       return it && customItemQuantities[key] !== Number(it.quantity);
     });
 
-    return shippingChanged || pricesChanged || quantitiesChanged;
-  }, [customItemPrices, customItemQuantities, customShipping, order, items, isLocked]);
+    return structureChanged || shippingChanged || pricesChanged || quantitiesChanged;
+  }, [customItemPrices, customItemQuantities, customShipping, order, items, isLocked, structureChanged]);
+
+  /** Add a product while editing; if it's already in the order, add one more of it. */
+  function handleAddProduct(p: Product) {
+    if (isLocked) return;
+    const key = String(p.id);
+    const inOrder = activeItems.find((it) => itemKeyOf(it) === key);
+    if (inOrder) {
+      handleQuantityChange(key, Number(inOrder.quantity) + 1);
+      toast.info(`${p.name}: quantity ${Number(inOrder.quantity) + 1}`);
+      return;
+    }
+    if (removedKeys[key]) {
+      setRemovedKeys(({ [key]: _gone, ...rest }) => rest);
+      return;
+    }
+    const price = productPrice(p);
+    if (price <= 0) {
+      toast.error(`${p.name} has no price in the store`);
+      return;
+    }
+    setAddedItems((a) => [...a, { productId: p.id, name: p.name, image: p.image, salt: p.salt, price, quantity: 1, isNew: true }]);
+  }
+
+  function handleRemoveItem(it: any) {
+    if (isLocked) return;
+    const key = itemKeyOf(it);
+    if (it.isNew) setAddedItems((a) => a.filter((x) => itemKeyOf(x) !== key));
+    else setRemovedKeys((r) => ({ ...r, [key]: true }));
+  }
+
+  /** Front desk: make the COD charge ₹0 (Firestore + WooCommerce fee line). */
+  async function handleWaiveCod() {
+    if (!order || isLocked) return;
+    try {
+      setWaivingCod(true);
+      const res = await ordersService.waiveCodCharge(String(order.id || orderKey));
+      toast.success("COD charge waived");
+      if (res.warning) toast.warning(res.warning, { duration: 10_000 });
+    } catch (err: any) {
+      toast.error(err?.message || "Could not waive the COD charge");
+    } finally {
+      setWaivingCod(false);
+    }
+  }
 
   function handlePriceChange(itemKey: string | number, newPrice: number) {
     if (isLocked) return;
@@ -338,22 +412,29 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
     setCustomItemQuantities({});
     setCustomShipping(null);
     setIsEditingShipping(false);
-    toast.info("Pricing and quantity changes reset");
+    setAddedItems([]);
+    setRemovedKeys({});
+    toast.info("Item and pricing changes reset");
   }
 
   async function handleSaveChanges() {
     if (!order || isLocked || !hasPendingChanges) return;
     try {
       setSavingPrices(true);
-      await ordersService.updateOrderPricing({
+      if (activeItems.length === 0) {
+        toast.error("An order needs at least one product");
+        return;
+      }
+      const res = await ordersService.updateOrderPricing({
         orderKey: String(order.id || orderKey),
-        wooId: order.wooId || null,
+        wooId: order.wooId || order.wooOrderId || null,
         items: activeItems.map((it) => ({
           productId: it.productId || 0,
           name: it.name,
           price: it.price,
           quantity: it.quantity,
           total: it.total,
+          image: it.image || "",
         })),
         shipping: activeShipping,
         subtotal: activeSubtotal,
@@ -365,7 +446,10 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
       setCustomItemQuantities({});
       setCustomShipping(null);
       setIsEditingShipping(false);
+      setAddedItems([]);
+      setRemovedKeys({});
       toast.success("Order items and pricing updated successfully!");
+      if (res?.warning) toast.warning(res.warning, { duration: 10_000 });
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || "Failed to update order");
@@ -733,7 +817,14 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
                   <li key={`${it.productId}-${i}`} className="flex flex-wrap items-center gap-3 px-6 py-3">
                     <ProductThumb src={it.image || null} className="size-11" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{it.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">{it.name}</span>
+                        {it.isNew && (
+                          <Badge variant="outline" className="border-primary/40 text-primary h-5 px-1.5 text-[10px]">
+                            Added
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
                         {it.productId > 0 && <span className="font-mono">#{it.productId}</span>}
                         {it.sku && <span>SKU {it.sku}</span>}
@@ -805,11 +896,26 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
                     <div className="w-20 text-right text-sm font-medium tabular-nums">
                       {formatINRStrict(it.total)}
                     </div>
+                    {!isLocked && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive size-7"
+                        aria-label={`Remove ${it.name}`}
+                        disabled={activeItems.length <= 1}
+                        title={activeItems.length <= 1 ? "An order needs at least one product" : "Remove from order"}
+                        onClick={() => handleRemoveItem(it)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    )}
                   </li>
                 );
               })}
               {activeItems.length === 0 && <li className="text-muted-foreground px-6 py-6 text-sm">No items in this order.</li>}
             </ul>
+
+            {!isLocked && !order.isLegacyWoo && <AddProductPanel onAdd={handleAddProduct} activeItems={activeItems} />}
 
             {/* Financial Summary */}
             <div className="grid gap-1.5 border-t px-6 py-4 text-sm sm:ml-auto sm:w-80">
@@ -889,7 +995,26 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
               )}
 
               {activeTax > 0 && <Row label="Tax (5%)" value={formatINRStrict(activeTax)} />}
-              {isCodOrder && order.codCharge > 0 && <Row label="COD charge" value={formatINRStrict(order.codCharge)} />}
+              {isCodOrder && order.codCharge > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">COD charge</span>
+                  <span className="flex items-center gap-2">
+                    {!isLocked && !order.isLegacyWoo && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground h-6 px-2 text-xs"
+                        disabled={waivingCod}
+                        onClick={handleWaiveCod}
+                      >
+                        {waivingCod ? <Loader2 className="size-3 animate-spin" /> : null} Waive
+                      </Button>
+                    )}
+                    <span className="tabular-nums">{formatINRStrict(order.codCharge)}</span>
+                  </span>
+                </div>
+              )}
+              {isCodOrder && order.codWaived && Number(order.codCharge || 0) === 0 && <Row label="COD charge" value="Waived" />}
               {order.walletUsed > 0 && <Row label="Wallet used" value={`−${formatINRStrict(order.walletUsed)}`} tone="text-success" />}
               <div className="my-1 border-t" />
               <Row label={isPaid ? "Paid" : "Payable"} value={formatINRStrict(activeTotal)} strong />
@@ -1162,6 +1287,87 @@ export function OrderDetail({ orderKey }: { orderKey: string }) {
         confirmLabel="Yes, Switch to COD & Erase Link"
         onConfirm={executeSwitchToCod}
       />
+    </div>
+  );
+}
+
+/** "Add medicine" while editing an order: search by name, salt or product ID. */
+function AddProductPanel({ onAdd, activeItems }: { onAdd: (p: Product) => void; activeItems: any[] }) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const { results, loading, fetching, error, searched } = useProductSearch(query, 1);
+  const qtyOf = (id: number) => activeItems.find((it) => String(it.productId) === String(id))?.quantity;
+
+  if (!open) {
+    return (
+      <div className="border-t px-6 py-3">
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          <Plus className="mr-1 size-3.5" /> Add medicine
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-muted/30 grid gap-3 border-t px-6 py-4">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search medicine name, salt or product ID"
+            className="bg-background pl-9"
+          />
+          {(loading || fetching) && (
+            <Loader2 className="text-muted-foreground absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin" />
+          )}
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Done
+        </Button>
+      </div>
+
+      {searched && (
+        <div className="bg-background max-h-72 overflow-y-auto rounded-lg border">
+          {error ? (
+            <p className="text-muted-foreground p-4 text-sm">{error}</p>
+          ) : loading && results.length === 0 ? (
+            <div className="grid gap-2 p-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : results.length === 0 ? (
+            <p className="text-muted-foreground p-4 text-sm">No medicines found. Try another spelling, the salt, or the product ID.</p>
+          ) : (
+            <ul className="divide-y">
+              {results.map((p) => {
+                const price = productPrice(p);
+                const qty = qtyOf(p.id);
+                return (
+                  <li key={p.id} className="flex items-center gap-3 px-3 py-2">
+                    <ProductThumb src={p.image} className="size-9" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{p.name}</div>
+                      <div className="text-muted-foreground truncate text-xs">
+                        #{p.id}
+                        {p.salt ? ` · ${p.salt}` : ""}
+                      </div>
+                    </div>
+                    <span className="text-sm tabular-nums">{price ? formatINRStrict(price) : "—"}</span>
+                    <Button size="sm" variant={qty ? "secondary" : "outline"} disabled={!price} onClick={() => onAdd(p)}>
+                      <Plus className="size-3.5" />
+                      {qty ? `Add (${qty})` : "Add"}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
