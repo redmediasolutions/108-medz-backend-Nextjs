@@ -31,6 +31,9 @@ export const qk = {
     appByUid: (uid: string) => ["orders", "app-by-uid", uid] as const,
     wooForCustomer: (phone: string, email: string) => ["orders", "woo-customer", phone, email] as const,
   },
+  reports: {
+    month: (month: string) => ["reports", "month", month] as const,
+  },
   searchdata: {
     history: (preset: string) => ["searchdata", "history", preset] as const,
     users: (ids: string[]) => ["searchdata", "users", ids] as const,

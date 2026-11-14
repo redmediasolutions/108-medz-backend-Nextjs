@@ -1,4 +1,4 @@
-import { ClipboardList, MapPinned, PackageSearch, ScanSearch, ShoppingCart, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, ClipboardList, MapPinned, PackageSearch, ScanSearch, ShoppingCart, Users, type LucideIcon } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -16,4 +16,5 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Prescriptions", href: "/prescriptions", icon: ClipboardList },
   { title: "Orders", href: "/orders", icon: ShoppingCart },
   { title: "Areas", href: "/pincodes", icon: MapPinned },
+  { title: "Reports", href: "/reports", icon: BarChart3 },
 ];
